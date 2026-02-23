@@ -2,6 +2,9 @@ import streamlit as st
 import numpy as np
 import os
 import ssl
+import urllib.request
+import io
+import certifi
 from PIL import Image, ImageDraw
 
 # Fix macOS SSL certificate verification issue (common with Python from python.org)
@@ -78,7 +81,6 @@ def fetch_lego_image(ldraw_id):
     
     try:
         # Create a secure context using certifi specifically to fix macOS errors
-        import ssl
         context = ssl.create_default_context(cafile=certifi.where())
         
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -174,24 +176,59 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
         
         cropped_img = image.crop((cx1, cy1, cx2, cy2))
         
-        # OBB MASKING: Erase everything outside the specific diagonal polygon (Background Noise)
+        # OBB ROBUST ALIGNMENT & MASKING: Erase background noise AND physically rotate the image to be straight
         if use_obb:
             poly = polygons[i]
-            # 1. Create a pure black canvas matching the crop
-            mask = Image.new("L", cropped_img.size, 0)
-            draw_mask = ImageDraw.Draw(mask)
+            
+            import cv2
+            # 1. Convert crop to numpy array for OpenCV processing
+            cv_img = np.array(cropped_img)
             
             # 2. Shift the global OBB coordinates to relative crop coordinates
             cropped_poly = [(pt[0] - cx1, pt[1] - cy1) for pt in poly]
             
-            # 3. Draw the piece shape in solid white on the mask
-            draw_mask.polygon(cropped_poly, fill=255)
+            # 3. Create a pure black mask
+            mask = np.zeros(cv_img.shape[:2], dtype=np.uint8)
+            pts = np.array(cropped_poly, np.int32).reshape((-1, 1, 2))
             
-            # 4. Create Pitch Black background image
-            black_bg = Image.new("RGB", cropped_img.size, (0, 0, 0))
+            # 4. Draw the piece shape in solid white on the mask
+            cv2.fillPoly(mask, [pts], (255))
             
-            # 5. Composite: Only let the real image show where the mask is white
-            cropped_img = Image.composite(cropped_img, black_bg, mask)
+            # 5. Composite: Only let the real image show where the mask is white (Blackout the rest)
+            masked_img = cv2.bitwise_and(cv_img, cv_img, mask=mask)
+            
+            # 6. MATHEMATICAL ALIGNMENT (Affine Transformation)
+            # Find the minimum area bounding rectangle to get the precise angle of the piece
+            rect = cv2.minAreaRect(pts)
+            (center, (width, height), angle) = rect
+            
+            # OpenCV's minAreaRect can return angles close to 90 or -90 depending on version
+            # We want the piece to lay flat horizontally or vertically, so we adjust
+            if width < height:
+                angle += 90
+            
+            # Calculate rotation matrix for affine warp
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            
+            # Rotate both the masked image and the mask itself
+            rotated_full = cv2.warpAffine(masked_img, M, (cv_img.shape[1], cv_img.shape[0]), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0))
+            rotated_mask = cv2.warpAffine(mask, M, (cv_img.shape[1], cv_img.shape[0]))
+            
+            # 7. Final Straight Crop: Now that it's straight, we crop the excess black space
+            x_rot, y_rot, w_rot, h_rot = cv2.boundingRect(rotated_mask)
+            pad_final = 2
+            x_rot = max(0, x_rot - pad_final)
+            y_rot = max(0, y_rot - pad_final)
+            w_rot = min(rotated_full.shape[1] - x_rot, w_rot + pad_final * 2)
+            h_rot = min(rotated_full.shape[0] - y_rot, h_rot + pad_final * 2)
+            
+            straightened_crop = rotated_full[y_rot:y_rot+h_rot, x_rot:x_rot+w_rot]
+            
+            # 8. Convert back to PIL for MobileNet feature extractor
+            if straightened_crop.size > 0: # Safety check
+                cropped_img = Image.fromarray(straightened_crop)
+            else:
+                 cropped_img = Image.fromarray(masked_img) # Fallback if math fails
         
         with st.expander(f"🧩 Part {i+1} - Confidence: {confidences[i]:.0%}", expanded=True):
             col1, col2, col3 = st.columns([1, 1, 2])
