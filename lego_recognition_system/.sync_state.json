@@ -1,16 +1,13 @@
 {
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/requirements.txt": "c86bb38131f5e0cd6f94978e57bc7dfb",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/config_train.json": "bc57d7a3e2ed23ec77a07ee1d1679d19",
+    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/config_train.json": "be4da3f9d70f2af517b712099d4dc057",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/master_unified_pipeline.ipynb": "171c047ced8b9da3acb0a17d2df1e992",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/download_assets.py": "b136a36433576dee34a337ef00e2cab0",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets/backgrounds/background.jpg": "003626d0715003d102d689853ec5327c",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/cycles_kernels.zip": "58bb737145eb4c65bf7f4792612e29d4",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/credentials.json": "1220a5d608da2c06843c555163ce9d41",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/token_1973.pickle": "b3b4201ba7204735f3815024f9375c9a",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/train_75078-1_20260222_2321.ipynb": "9384e78a042a5bd68415b901a0857c23",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/train_75078-1_20260223_0737.ipynb": "285ff630c21b19defa89ef2de75afc8a",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/train_75078-1_20260223_0811.ipynb": "171c047ced8b9da3acb0a17d2df1e992",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/train_75078-1_20260223_0819.ipynb": "171c047ced8b9da3acb0a17d2df1e992",
+    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/token_1973.pickle": "efb4bc5c42caffd74896da18f3979577",
+    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/train_75078-1_20260223_1000.ipynb": "171c047ced8b9da3acb0a17d2df1e992",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/models/yolo_model/best.pt": "0910907d7d072cb1644e817b21b5067a",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/__init__.py": "d41d8cd98f00b204e9800998ecf8427e",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/logic/build_reference_index.py": "646e4b642489cf40eceba66bf99b315d",
@@ -32,5 +29,5 @@
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/blender_scripts/test_dimensions.py": "7fe9b08a8dfacb89eff66bcc1c9a865f",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/gui/__init__.py": "db9807a558ac9a40faa9eac6b3a84c9c",
     "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/gui/launcher_view.py": "3b089b0c4bbbf6ac0c4657dcdfd5ab00",
-    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/gui/recognition_view.py": "b6cf8db017ed8c1b0296af77d2a71d68"
+    "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/gui/recognition_view.py": "945e4f0088d897f46bb9062d06187ee1"
 }
