@@ -22,6 +22,7 @@ except ImportError:
 
 from src.logic.feature_extractor import FeatureExtractor
 from src.logic.vector_index import VectorIndex
+from src.logic.golden_crop import GoldenCropExtractor
 
 
 @st.cache_resource(show_spinner="⏳ Cargando modelos de IA...")
@@ -90,9 +91,12 @@ def load_models(models_dir):
     else:
         status["errors"].append(f"Directorio de vectores no existe: {piezas_dir}")
 
+    # ── GOLDEN CROP EXTRACTOR ──────────────────────────────────────────────────
+    golden_extractor = GoldenCropExtractor(target_size=384)
+
     # Store status for sidebar (but also return it for cache-hit support)
     st.session_state["model_status"] = status
-    return yolo_model, feature_extractor, vector_index, status
+    return yolo_model, feature_extractor, vector_index, status, golden_extractor
 
 def render_sidebar_model_status():
     """Reads model_status from session_state and renders it in the sidebar."""
@@ -226,7 +230,7 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
         st.error(f"Error cargando imagen: {e}")
         return
 
-    yolo, extractor, v_index, _ = load_models(models_dir)
+    yolo, extractor, v_index, _, golden_extractor = load_models(models_dir)
     if yolo is None or extractor is None:
         st.error("❌ Los modelos no pudieron cargarse. Revisa los errores en el sidebar.")
         return
@@ -311,53 +315,23 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
 
     identified_parts = {}
 
-    for i, box in enumerate(scaled_boxes):
-        x1, y1, x2, y2 = map(int, box)
-        pad = 10 # More padding for high-res crops
-        cx1 = max(0, x1 - pad)
-        cy1 = max(0, y1 - pad)
-        cx2 = min(image.width, x2 + pad)
-        cy2 = min(image.height, y2 + pad)
-        
-        # CRITICAL: CROP FROM ORIGINAL HIGH-RES IMAGE
-        cropped_img = image.crop((cx1, cy1, cx2, cy2))
+    # Prepare detections for Golden Crop processing
+    # Note: SAHI gives us detections in original image coordinates
+    detections_input = []
+    for d in final_detections:
+        detections_input.append({
+            'box': d['box'],
+            'polygon': d['polygon']
+        })
 
-        # Segmentation mask alignment & blackout on High-Res
-        if use_masks and scaled_polygons is not None:
-            import cv2
-            poly = scaled_polygons[i]
-            cv_img = np.array(cropped_img)
-            # Adjust polygon to crop coordinates
-            cropped_poly = [(pt[0] - cx1, pt[1] - cy1) for pt in poly]
-            mask = np.zeros(cv_img.shape[:2], dtype=np.uint8)
-            pts = np.array(cropped_poly, np.int32).reshape((-1, 1, 2))
-            cv2.fillPoly(mask, [pts], 255)
-            masked_img = cv2.bitwise_and(cv_img, cv_img, mask=mask)
+    # Execute Golden Crop extraction (Standardized 384x384)
+    # We pass the full original image and our SAHI detections
+    golden_crops = golden_extractor.process_detections(np.array(image), detections_input)
 
-            rect = cv2.minAreaRect(pts)
-            (center, (width_r, height_r), angle) = rect
-            if width_r < height_r:
-                angle += 90
-            M = cv2.getRotationMatrix2D(center, angle, 1.0)
-            rotated_full = cv2.warpAffine(masked_img, M, (cv_img.shape[1], cv_img.shape[0]),
-                                          flags=cv2.INTER_CUBIC,
-                                          borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
-            rotated_mask = cv2.warpAffine(mask, M, (cv_img.shape[1], cv_img.shape[0]))
+    for i, cropped_img in enumerate(golden_crops):
+        conf_val = final_detections[i]['conf']
 
-            x_r, y_r, w_r, h_r = cv2.boundingRect(rotated_mask)
-            pf = 2
-            x_r = max(0, x_r - pf)
-            y_r = max(0, y_r - pf)
-            w_r = min(rotated_full.shape[1] - x_r, w_r + pf * 2)
-            h_r = min(rotated_full.shape[0] - y_r, h_r + pf * 2)
-            straight = rotated_full[y_r:y_r + h_r, x_r:x_r + w_r]
-
-            if straight.size > 0:
-                cropped_img = Image.fromarray(straight)
-            else:
-                cropped_img = Image.fromarray(masked_img)
-
-        with st.expander(f"🧩 PASO {i+1}: Identificando pieza (YOLO Conf: {confidences[i]:.0%})", expanded=True):
+        with st.expander(f"🧩 PASO {i+1}: Identificando pieza (YOLO Conf: {conf_val:.0%})", expanded=True):
             col_crop, col_ref, col_details = st.columns([1.2, 1.2, 2.1])
 
             with col_crop:

@@ -229,7 +229,7 @@ def main(target_parts, render_settings=None):
                     'tier': 'REF',
                     'imgs': ref_imgs_per_piece,
                     'engine': 'CYCLES',
-                    'res': 512,  # Optimized: DINOv2 input is 384px; 512 gives margin with 6x speedup vs 1280
+                    'res': 384,  # Optimized for DINOv2 (Perfect-Fit)
                     'ref_num_images': ref_imgs_per_piece,
                     'is_minifig': p_entry.get('is_minifig', False),
                 }]
@@ -320,7 +320,7 @@ def main(target_parts, render_settings=None):
                             'tier': 'MIX',
                             'imgs': n_imgs,
                             'engine': 'CYCLES',
-                            'res': 800,
+                            'res': 5656, # Calibrated for iPhone 16 24MP (4:3 aspect handled in scene_setup)
                             'parts_per_image': pieces_per_image,
                         })
                     

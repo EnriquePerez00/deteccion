@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from src.logic.feature_extractor import FeatureExtractor
 from src.logic.vector_index import VectorIndex
+from src.logic.golden_crop import GoldenCropExtractor
 from src.logic.lego_colors import get_color_onehot, get_num_colors, get_color_name
 from pathlib import Path
 
@@ -16,6 +17,7 @@ def build_index(dataset_dir, output_folder, unified=True, force=False):
     os.makedirs(output_folder, exist_ok=True)
     
     extractor = FeatureExtractor(model_name='dinov2_vits14')
+    # Perfect-Fit Mode: We bypass GoldenCropExtractor (YOLO) since renders are already standardized
     unified_index = VectorIndex() if unified else None
     
     # --- INCREMENTAL LOGIC ---
@@ -69,64 +71,26 @@ def build_index(dataset_dir, output_folder, unified=True, force=False):
         img_path = os.path.join(images_dir, img_file)
         if not os.path.exists(img_path): continue
             
-        img = cv2.imread(img_path)
-        if img is None: continue
-        h, w, _ = img.shape
+        # Perfect-Fit Strategy: Direct extraction without YOLO
+        # The image is already 384x384 and perfectly centered
+        crop_pil = Image.open(img_path).convert('RGB')
         
-        with open(os.path.join(labels_dir, label_file), 'r') as f:
-            lines = f.readlines()
-            
         # Resolve Identity: Metadata first, then names_map, then class_id
-        real_ids = image_meta.get(img_file, {}).get('ids', image_meta.get(img_file, []))
+        real_ids = image_meta.get(img_file, {}).get('ids', [])
         real_colors = image_meta.get(img_file, {}).get('color_ids', [])
-        # Handle legacy format where image_meta value is just a list of ids
-        if isinstance(real_ids, list) and not isinstance(image_meta.get(img_file, {}), dict):
-            real_ids = image_meta.get(img_file, [])
-            real_colors = []
-        
-        for inst_idx, line in enumerate(lines):
-            parts = line.split()
-            if not parts: continue
-            class_id = int(parts[0])
+
+        # For ref_pieza, there is only 1 piece per image
+        for inst_idx in range(len(real_ids)):
+            # Get Embedding
+            embedding = extractor.get_embedding(crop_pil)
             
-            # Use Segmentation or fallback to BBox
-            if len(parts) >= 5: 
-                if len(parts) > 5: # Segmentation
-                    coords = list(map(float, parts[1:]))
-                    pixel_points = [[int(coords[i]*w), int(coords[i+1]*h)] for i in range(0, len(coords), 2)]
-                    pts = np.array(pixel_points, np.int32).reshape((-1, 1, 2))
-                    x_b, y_b, w_b, h_b = cv2.boundingRect(pts)
-                else: # Classic YOLO BBox: class x_c y_c w h
-                    x_c, y_c, w_n, h_n = map(float, parts[1:])
-                    w_b, h_b = int(w_n * w), int(h_n * h)
-                    x_b, y_b = int((x_c * w) - w_b/2), int((y_c * h) - h_b/2)
-                
-                # Safety Crop
-                x_b, y_b = max(0, x_b), max(0, y_b)
-                w_b, h_b = min(w - x_b, w_b), min(h - y_b, h_b)
-                if w_b < 5 or h_b < 5: continue
-                
-                # Extract piece
-                crop = img[y_b:y_b+h_b, x_b:x_b+w_b]
-                
-                # Letterboxing
-                max_dim = max(h_b, w_b)
-                canvas = np.zeros((max_dim, max_dim, 3), dtype=np.uint8)
-                canvas[(max_dim-h_b)//2:(max_dim-h_b)//2+h_b, (max_dim-w_b)//2:(max_dim-w_b)//2+w_b] = crop
-                
-                # Get Embedding
-                crop_pil = Image.fromarray(cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB))
-                embedding = extractor.get_embedding(crop_pil)
-                
-                # Resolve Identity: Metadata first, then names_map, then class_id
-                if inst_idx < len(real_ids):
-                    ldraw_id = real_ids[inst_idx]
-                else:
-                    ldraw_id = names_map[class_id] if class_id < len(names_map) else str(class_id)
-                
-                # Resolve Color
-                color_id = real_colors[inst_idx] if inst_idx < len(real_colors) else -1
-                
+            # Resolve Identity
+            ldraw_id = real_ids[inst_idx]
+            
+            # Resolve Color
+            color_id = real_colors[inst_idx]
+            
+            if ldraw_id != "unknown":
                 if ldraw_id not in piece_data:
                     piece_data[ldraw_id] = {'embeddings': [], 'metadata': []}
                 piece_data[ldraw_id]['embeddings'].append(embedding)

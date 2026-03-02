@@ -395,7 +395,12 @@ def render_launcher_ui(project_root):
                 st.success(f"📦 ZIP listo: **{os.path.basename(latest_zip)}** ({zip_size:.1f} MB)")
                 st.session_state['latest_lightning_zip'] = latest_zip
         else:
-            st.error(f"❌ Fallo {process.returncode}")
+            if not render_success:
+                st.error(f"❌ Fallo en Renderizado (código {process_render.returncode})")
+            elif not index_success:
+                st.error(f"❌ Fallo en Indexación Vectorial (código {process_index.returncode})")
+            else:
+                st.error("❌ Fallo desconocido en el pipeline.")
 
     # --- 4. Notebooks (Lightning + Kaggle) ---
     st.divider()

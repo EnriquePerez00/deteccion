@@ -148,8 +148,20 @@ def setup_render_engine(engine='CYCLES', resolution=(2048, 2048)):
     
     # 🎞️ Film transparency enabled to allow compositing over a background image
     scene.render.film_transparent = True
+
+    # 🎨 Color Management: AgX for highlight preservation (prevents color wash-out)
+    if hasattr(scene.view_settings, "view_transform"):
+        # AgX is superior in Blender 4.0+, Filmic fallback for older
+        scene.view_settings.view_transform = 'AgX' if bpy.app.version >= (4, 0, 0) else 'Filmic'
+        scene.view_settings.exposure = -0.7  # Prevent clipping in highlights
+        scene.view_settings.look = 'High Contrast'
     
-    print("  ⚡ Cycles Eco-Mode: 64 samples + OptiX denoising. Tiling DISABLED. Film Transparent ENABLED.")
+    # Shadows & AO: Fast GI Approximation in Cycles
+    if hasattr(scene.cycles, "use_fast_gi"):
+        scene.cycles.use_fast_gi = True
+        scene.cycles.fast_gi_method = 'AO'
+    
+    print(f"  ⚡ Render Config: 64 samples + {scene.view_settings.view_transform} + High Contrast active.")
 
 def register_ldraw_addon(addon_path=None):
     """Register the ImportLDraw addon from a dynamic path or local script dir."""
@@ -249,13 +261,12 @@ def set_origin_to_center(obj):
     print(f"  🎯 Origin centered for {obj.name}")
 
 def setup_camera():
-    """Create a camera at 70cm height with 126mm lens to cover 20x20cm surface.
-    iPhone 16 @ 24MP zenithal reference: sensor 36mm, distance 70cm, FOV 20cm.
-    Lens = (sensor × distance) / field_width = (36 × 0.70) / 0.20 = 126mm
+    """Create a camera at 70cm height with 26mm lens (iPhone 16 simulation).
+    iPhone 16 Main Camera: 26mm focal length (35mm equivalent), 36mm sensor width.
     """
     bpy.ops.object.camera_add(location=(0, 0, 0.7))
     cam = bpy.context.object
-    cam.data.lens = 126            # 126mm at 0.7m covers ~20cm width on 36mm sensor
+    cam.data.lens = 26.0           # 26mm focal length
     cam.data.sensor_width = 36.0   # Full-frame equivalent
     
     # Sharp Focus at 70cm
@@ -285,7 +296,13 @@ def setup_lighting():
         # Add a very subtle overhead fill just to lift the deep shadows
         bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
         key = bpy.context.object
-        key.data.energy = random.uniform(100, 200)
+        key.data.energy = random.uniform(50, 150)
+        
+        # Rim light to highlight edges
+        bpy.ops.object.light_add(type='AREA', location=(0.5, 0.5, 0.4))
+        rim = bpy.context.object
+        rim.rotation_euler = (math.radians(-60), 0, math.radians(45))
+        rim.data.energy = 300
         return scenario
 
     if scenario == 'overhead':
@@ -469,51 +486,60 @@ def setup_compositor():
     # 1. Distort (Lens Imperfections)
     distort = safe_node_new('CompositorNodeLensdist', 'Lens Imperfections')
     if distort:
-        safe_set_input(distort, 'Distort', 0.01)
-        safe_set_input(distort, 1, 0.01)
-        safe_set_input(distort, 'Dispersion', 0.02)
-        safe_set_input(distort, 2, 0.02)
+        safe_set_input(distort, 'Distort', 0.005)
+        safe_set_input(distort, 'Dispersion', 0.01)
 
-    # 2. Glare (Bloom)
+    # 2. Gaussian Blur (Sensor Softness)
+    # Replicates the slight lack of "infinite sharpness" in smartphone optics
+    blur = safe_node_new('CompositorNodeBlur', 'Sensor Softness')
+    if blur:
+        blur.filter_type = 'GAUSSIAN'
+        safe_set_input(blur, 'Size X', 1.0)
+        safe_set_input(blur, 'Size Y', 1.0)
+
+    # 3. Glare (Bloom)
     glare = safe_node_new('CompositorNodeGlare', 'Lens Bloom')
     if glare:
         safe_set(glare, 'glare_type', 'FOG_GLOW')
         safe_set(glare, 'glare_quality', 'HIGH')
-        safe_set(glare, 'quality', 'HIGH')
 
-    # 3. Grain (Sensor Mix)
+    # 4. Grain (Digital Sensor Noise)
+    # High ISO simulation for smartphone sensors
     noise_mix = safe_node_new('CompositorNodeMixRGB', 'Sensor Grain Mix')
     noise_tex = None
     if noise_mix:
         safe_set(noise_mix, 'blend_type', 'OVERLAY')
-        safe_set_input(noise_mix, 'Fac', 0.05)
-        safe_set_input(noise_mix, 0, 0.05)
+        safe_set_input(noise_mix, 'Fac', 0.08) # Slightly more visible for vectors
         try:
             noise_tex = nodes.new(type='CompositorNodeTexture')
             if "SensorNoise" not in bpy.data.textures:
                 tex = bpy.data.textures.new("SensorNoise", type='NOISE')
-                if hasattr(tex, 'noise_scale'): tex.noise_scale = 0.005
+                if hasattr(tex, 'noise_scale'): tex.noise_scale = 0.002 # Finer grain
             noise_tex.texture = bpy.data.textures["SensorNoise"]
         except: pass
 
-    # --- Linking Logic (CHAIN: Render -> Distort -> Glare -> Grain -> Composite) ---
+    # --- Linking Logic (CHAIN: Render -> Distort -> Blur -> Glare -> Grain -> Composite) ---
     try:
         last_out = render_layers.outputs[0]
         
         if distort:
             links.new(last_out, distort.inputs[0])
             last_out = distort.outputs[0]
-
+        
+        if blur:
+            links.new(last_out, blur.inputs[0])
+            last_out = blur.outputs[0]
+            
         if glare:
             links.new(last_out, glare.inputs[0])
             last_out = glare.outputs[0]
             
-        if noise_mix and noise_tex:
+        if noise_mix:
             links.new(last_out, noise_mix.inputs[1])
-            links.new(noise_tex.outputs[0], noise_mix.inputs[2])
+            if noise_tex:
+                links.new(noise_tex.outputs[0], noise_mix.inputs[2])
             last_out = noise_mix.outputs[0]
             
-        # Final connection
         links.new(last_out, composite.inputs[0])
     except Exception as e:
         print(f"  ⚠️ Logic Error linking nodes: {e}")
@@ -582,8 +608,11 @@ def setup_world_hdri(assets_dir):
 
 
 def setup_ground_texture(ground_obj, assets_dir):
-    """Sets a random texture from assets_dir/backgrounds for the ground plane."""
-    bg_dir = os.path.join(assets_dir, "backgrounds")
+    """Sets a random texture from assets_dir/backgrounds/dynamic_pool for the ground plane."""
+    # First try dynamic_pool, fallback to backgrounds
+    bg_dir = os.path.join(assets_dir, "backgrounds", "dynamic_pool")
+    if not os.path.exists(bg_dir):
+        bg_dir = os.path.join(assets_dir, "backgrounds")
     if not os.path.exists(bg_dir):
         return
 
@@ -647,10 +676,10 @@ def _apply_bevel_to_mesh(obj):
         
         try:
             bevel = o.modifiers.new(name="LEGO_Bevel", type='BEVEL')
-            bevel.width = 0.0002       # 0.2mm — subtle, matches real LEGO tolerance
+            bevel.width = 0.0004       # 0.4mm — Increased for better visibility (stud edges)
             bevel.segments = 2         # 2 segments = smooth highlight, not faceted
             bevel.limit_method = 'ANGLE'  # Only bevel clean edges, protect complex geometry
-            bevel.angle_limit = 0.523  # ~30° — avoids artifacts on non-manifold stud mesh
+            bevel.angle_limit = math.radians(35) # ~35°
             bevel.use_clamp_overlap = True
         except Exception as e:
             print(f"  ⚠️ Bevel modifier error on {o.name}: {e}")
@@ -701,22 +730,22 @@ def _apply_lego_material(obj, color_id=None):
                                 mat.node_tree.links.remove(link)
                         base_color_input.default_value = rgba
                     
-                    bsdf.inputs["Roughness"].default_value = 0.15
+                    bsdf.inputs["Roughness"].default_value = 0.20  # More realistic, less wash-out
                     bsdf.inputs["IOR"].default_value = 1.45
                     
                     # Subsurface logic
                     if "Subsurface Weight" in bsdf.inputs:
-                        bsdf.inputs["Subsurface Weight"].default_value = 0.02
+                        bsdf.inputs["Subsurface Weight"].default_value = 0.01  # Reduced "waxiness"
                     elif "Subsurface" in bsdf.inputs:
-                        bsdf.inputs["Subsurface"].default_value = 0.02
+                        bsdf.inputs["Subsurface"].default_value = 0.01
                         
-                    # Clearcoat
+                    # Clearcoat (Specular highlights on studs)
                     if "Coat Weight" in bsdf.inputs:
-                        bsdf.inputs["Coat Weight"].default_value = 0.1
-                        bsdf.inputs["Coat Roughness"].default_value = 0.05
+                        bsdf.inputs["Coat Weight"].default_value = 0.15
+                        bsdf.inputs["Coat Roughness"].default_value = 0.03
                     elif "Clearcoat" in bsdf.inputs:
-                        bsdf.inputs["Clearcoat"].default_value = 0.1
-                        bsdf.inputs["Clearcoat Roughness"].default_value = 0.05
+                        bsdf.inputs["Clearcoat"].default_value = 0.15
+                        bsdf.inputs["Clearcoat Roughness"].default_value = 0.03
             
             # Apply material to all existing slots to ensure full coverage
             if not o.data.materials:
@@ -812,6 +841,28 @@ def get_hierarchy_vertices(obj):
     for child in obj.children:
         verts.extend(get_hierarchy_vertices(child))
     return verts
+
+def get_geometry_aabb(obj):
+    """Calculates the world-space AABB of a hierarchy. 
+    Returns: (center_vector, max_radius_from_center)
+    """
+    verts = get_hierarchy_vertices(obj)
+    if not verts:
+        return Vector((0,0,0)), 0.05
+    
+    xs = [v.x for v in verts]
+    ys = [v.y for v in verts]
+    zs = [v.z for v in verts]
+    
+    min_v = Vector((min(xs), min(ys), min(zs)))
+    max_v = Vector((max(xs), max(ys), max(zs)))
+    
+    center = (min_v + max_v) / 2.0
+    # Radius is the distance from center to the furthest corner of AABB
+    # or max distance to any vertex for better fit.
+    max_d = max([(v - center).length for v in verts])
+    
+    return center, max_d
 
 def get_convex_hull(points):
     """Computes the convex hull of a set of 2D points using Graham scan."""
@@ -993,9 +1044,11 @@ def main():
     
     # Extract new Tiering parameters
     # Fallback for old templates
+    # Calibration: iPhone 16 (24MP 4:3)
+    # 5656 x 4242 px
     global_render_engine = data.get('render_engine', 'CYCLES')
-    res_x = data.get('resolution_x', 640)
-    res_y = data.get('resolution_y', 640)
+    res_x = data.get('resolution_x', 5656)
+    res_y = data.get('resolution_y', 4242)
     
     setup_render_engine(engine=global_render_engine, resolution=(res_x, res_y))
     setup_compositor()  # Sensor noise + bloom glare post-processing
@@ -1023,8 +1076,10 @@ def main():
     except Exception as e:
         print(f"Warning: Could not set color management: {e}")
 
-    # Create Ground Plane (20x20cm — matches iPhone 16 FOV at 70cm)
-    bpy.ops.mesh.primitive_plane_add(size=0.2, location=(0, 0, 0))
+    # Create Ground Plane (50x50cm training surface)
+    # Note: Camera at 70cm with 26mm lens covers ~97x73cm FOV.
+    # The 50x50cm plane will be centered, avoiding edge distortions.
+    bpy.ops.mesh.primitive_plane_add(size=0.5, location=(0, 0, 0))
     ground = bpy.context.object
     
     # Configure Rigid Body World for high accuracy with small LEGO parts
@@ -1067,12 +1122,12 @@ def main():
     render_mode = data.get('render_mode', 'images_mix')
     PARTS_PER_IMAGE = data.get('parts_per_image', 20)  # For images_mix mode
     
-    # 1. Setup Camera (Fixed Zenithal Centered)
-    # Surface is 20x20cm centered at 0,0.
+    # 1. Setup Camera (Fixed Zenithal Centered - iPhone 16 Calibration)
+    # Calibrated to 26mm @ 0.70m height
     cam.location = (0, 0, 0.70) 
     cam.rotation_euler = (0, 0, 0) 
-    cam.data.sensor_width = 36.0 # Ensure standard full-frame sensor
-    cam.data.lens = 126.0 # 126mm to capture 20x20cm area at 70cm
+    cam.data.sensor_width = 36.0 # Full-frame equivalent sensor
+    cam.data.lens = 26.0 # 26mm focal length (iPhone 16)
 
     # Initialize Resolver
     resolver = LDrawResolver(ldraw_path_base)
@@ -1194,6 +1249,79 @@ def main():
             worker_id = data.get('worker_id', '')
             prefix_base = f"w{worker_id}_" if worker_id != '' else ""
             
+            # --- FAISS OPTIMIZATION SETUP ---
+            # 1. Optics & Resolution
+            if 'Camera' in bpy.data.objects:
+                cam_obj = bpy.data.objects['Camera']
+                cam_obj.data.lens = 210.0  # 12x12cm FOV at 70cm
+            
+            scene = bpy.context.scene
+            scene.render.resolution_x = 384
+            scene.render.resolution_y = 384
+            scene.render.resolution_percentage = 100
+            
+            # 2. Adaptive High-Contrast Background
+            # Color IDs for dark pieces (Black, Blue, Green, Dk Gray, etc.)
+            dark_ids = [0, 1, 2, 6, 8, 22, 272, 288, 320]
+            is_dark_piece = color_id_ref in dark_ids
+            ground_obj = bpy.data.objects.get("Plane")
+            
+            # Determine background color based on contrast
+            bg_color = (1.0, 1.0, 1.0, 1.0) if is_dark_piece else (0.0, 0.0, 0.0, 1.0)
+            contrast_label = "WHITE" if is_dark_piece else "BLACK"
+            print(f"  🌓 High Contrast Mode: Piece {ldraw_id_ref} (Color {color_id_ref}) -> {contrast_label} background.")
+            
+            # 2a. Configure Ground
+            scene.render.film_transparent = False
+            if ground_obj:
+                ground_obj.hide_render = False
+                if not ground_obj.data.materials:
+                    mat = bpy.data.materials.new(name="ContrastGround")
+                    ground_obj.data.materials.append(mat)
+                mat = ground_obj.data.materials[0]
+                mat.use_nodes = True
+                bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+                if bsdf:
+                    # Clear links to Base Color
+                    for link in list(mat.node_tree.links):
+                        if link.to_socket == bsdf.inputs['Base Color']:
+                            mat.node_tree.links.remove(link)
+                    bsdf.inputs['Base Color'].default_value = bg_color
+                    bsdf.inputs['Roughness'].default_value = 1.0
+                    bsdf.inputs['Specular'].default_value = 0.0 if hasattr(bsdf.inputs, 'Specular') else 0.0
+            
+            # 2b. Configure World/Environment
+            if scene.world and scene.world.use_nodes:
+                bg_node = next((n for n in scene.world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+                if bg_node:
+                    bg_node.inputs['Color'].default_value = bg_color
+                    # For black background, we need extra lights to see the piece
+                    bg_node.inputs['Strength'].default_value = 0.1 if not is_dark_piece else 1.0
+            
+            # 3. M4 Pro Render Tiering
+            piece_tier = pc.get('tier', 'REF').upper()
+            if hasattr(scene, 'cycles'):
+                scene.cycles.use_adaptive_sampling = True
+                scene.cycles.adaptive_threshold = 0.05
+                # Base MetalRT / GPU settings are handled globally by setup_render_engine
+                
+                if piece_tier == 'TIER1' or piece_tier == 'REF':
+                    scene.cycles.samples = 32
+                    scene.cycles.max_bounces = 2
+                    scene.cycles.diffuse_bounces = 1
+                    scene.cycles.glossy_bounces = 1
+                elif piece_tier == 'TIER2':
+                    scene.cycles.samples = 64
+                    scene.cycles.max_bounces = 4
+                    scene.cycles.diffuse_bounces = 2
+                    scene.cycles.glossy_bounces = 2
+                else: # TIER3
+                    scene.cycles.samples = 128
+                    scene.cycles.max_bounces = 6
+                    scene.cycles.diffuse_bounces = 3
+                    scene.cycles.glossy_bounces = 3
+                print(f"  ⚡ TIER {piece_tier} Optimization: {scene.cycles.samples} samples, {scene.cycles.max_bounces} bounces.")
+            
             # --- PHYSICS STABILITY SETUP ---
             SETTLE_FRAMES = 150
             num_drops = 30
@@ -1211,7 +1339,6 @@ def main():
             template_obj.rigid_body.linear_damping = 0.6
             template_obj.rigid_body.angular_damping = 0.6
 
-            scene = bpy.context.scene
             for d in range(num_drops):
                 # Reset simulation for each drop
                 scene.frame_set(1)
@@ -1234,21 +1361,37 @@ def main():
                 
                 # 3. Capture N Z-rotations per face
                 for r in range(rots_per_face):
-                    # Z-axis rotation to capture the same stable face from different angles
+                    # Z-axis rotation for viewing diversity
                     template_obj.rotation_euler[2] += (6.28 / rots_per_face) + random.uniform(-0.05, 0.05)
                     bpy.context.view_layer.update()
                     
-                    # Vary lighting and background every 4 images
-                    if img_count % 4 == 0:
-                        setup_lighting()
-                        setup_world_hdri(assets_dir)
-                        ground_obj = bpy.data.objects.get("Plane")
-                        if ground_obj:
-                            setup_ground_texture(ground_obj, assets_dir)
-                
-                    # Render
+                    # 🚀 PERFECT-FIT CAMERA CALCULATION 🚀
+                    # Centroid based centering + 85% Frame occupancy
+                    center, radius = get_geometry_aabb(template_obj)
+                    
                     if not scene.camera:
                         scene.camera = bpy.data.objects.get("Camera")
+                    cam_obj = scene.camera
+                    
+                    # Target the centroid directly (compensates for asymmetric shapes)
+                    cam_obj.location.x = center.x
+                    cam_obj.location.y = center.y
+                    
+                    # Calculate required distance for 85% FOV coverage
+                    # FOV_angle_rad = 2 * atan(sensor_width / (2 * focal_length))
+                    # At dist 'd', frame_width = 2 * d * tan(FOV/2)
+                    # We want piece_width (2*radius) = 0.85 * frame_width
+                    # 2*radius = 0.85 * 2 * d * (sensor_width / (2 * focal_length))
+                    # d = (radius * focal_length) / (0.85 * sensor_p_half) where sensor_p_half = sensor_width / 2
+                    focal = cam_obj.data.lens # 126.0 or 210.0
+                    sensor_half = cam_obj.data.sensor_width / 2.0
+                    target_dist = (radius * focal) / (0.85 * sensor_half)
+                    
+                    # Apply Z distance (ensures exact framing regardless of part height)
+                    cam_obj.location.z = center.z + target_dist
+                    cam_obj.data.dof.focus_distance = target_dist
+                    
+                    bpy.context.view_layer.update()
                     
                     img_idx = img_count + offset_idx
                     img_prefix = f"{prefix_base}img_{img_idx:04d}"
@@ -1256,35 +1399,30 @@ def main():
                     scene.render.filepath = render_path
                     
                     if img_count % 20 == 0 or img_count == ref_n_images - 1:
-                        print(f"PROGRESS: {img_count + 1}/{ref_n_images} (Physics Stable Snap)")
+                        print(f"PROGRESS: {img_count + 1}/{ref_n_images} (Perfect-Fit Snap)")
                     
                     bpy.ops.render.render(write_still=True)
                     
-                    # Generate label for centered piece
+                    # 🎯 PRECISE 2D PROJECTED LABEL (.txt)
                     label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
-                    camera = scene.camera
-                    
-                    # Recalculate vertices after position update for labels
                     verts_3d = get_hierarchy_vertices(template_obj)
                     if verts_3d:
-                        coords_2d = [world_to_camera_view(scene, camera, coord) for coord in verts_3d]
-                        visible_points = []
-                        for c in coords_2d:
-                            if c.z > 0:
-                                cx = max(0.0, min(1.0, c.x))
-                                cy = max(0.0, min(1.0, c.y))
-                                visible_points.append((cx, cy))
+                        coords_2d = [world_to_camera_view(scene, scene.camera, v) for v in verts_3d]
+                        x_vals = [c.x for c in coords_2d if c.z > 0]
+                        y_vals = [c.y for c in coords_2d if c.z > 0]
                         
-                        hull = get_convex_hull(visible_points) if len(visible_points) >= 3 else []
-                        
-                        with open(label_path, 'w') as lf:
-                            if hull and len(hull) >= 3:
-                                pts = []
-                                for corner in hull:
-                                    px = max(0.0, min(1.0, corner[0]))
-                                    py = max(0.0, min(1.0, 1.0 - corner[1]))
-                                    pts.extend([f"{px:.6f}", f"{py:.6f}"])
-                                lf.write(f"{class_id} {' '.join(pts)}\n")
+                        if x_vals and y_vals:
+                            x_min, x_max = min(x_vals), max(x_vals)
+                            y_min, y_max = min(y_vals), max(y_vals)
+                            
+                            # Normalize according to user formula
+                            x_center = (x_min + x_max) / 2.0
+                            y_center = 1.0 - ((y_min + y_max) / 2.0) # YOLO Invert Y
+                            w_box = x_max - x_min
+                            h_box = y_max - y_min
+                            
+                            with open(label_path, 'w') as lf:
+                                lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}\n")
                     
                     # Metadata
                     meta_path = os.path.join(output_base, "image_meta.jsonl")
@@ -1561,8 +1699,7 @@ def main():
                             active_ids_in_image.append(obj.get('ldraw_id', 'unknown'))
                             active_colors_in_image.append(obj.get('color_id_lego', -1))
                     
-                    # Log real IDs + colors for this image to image_meta.jsonl
-                    if active_ids_in_image:
+                        # Log real IDs + colors for this image to image_meta.jsonl
                         active_color_names = [
                             obj.get('color_name_lego', '') for obj in active_pieces
                             if 'class_id' in obj and not obj.hide_render
@@ -1574,6 +1711,15 @@ def main():
                                 "color_ids": active_colors_in_image,
                                 "color_names": active_color_names
                             }) + "\n")
+                else:
+                    # It's an empty background. Still write to metadata so it's not orphaned.
+                    with open(meta_path, 'a') as mf:
+                        mf.write(json.dumps({
+                            "img": f"{img_prefix}.jpg", 
+                            "ids": [],
+                            "color_ids": [],
+                            "color_names": []
+                        }) + "\n")
             
             # Restore Z position if it was a negative sample
             if is_empty_background:
