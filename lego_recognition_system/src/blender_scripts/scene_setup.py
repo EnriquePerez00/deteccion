@@ -8,6 +8,7 @@ import shutil
 from pathlib import Path
 import math
 from mathutils import Vector, Euler
+from bpy_extras.object_utils import world_to_camera_view
 
 # Add current dir to path to find local modules if needed (optional)
 import addon_utils
@@ -221,6 +222,20 @@ def clean_scene():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
+def snap_to_ground(objects, ground_z=0.0, max_hover=0.003):
+    """Force any piece still hovering above max_hover down to ground contact.
+    This is a safety net after the physics simulation."""
+    snapped = 0
+    for obj in objects:
+        if obj.location.z > ground_z + max_hover:
+            # Check if piece is supposed to rest on another piece
+            if obj.location.z > ground_z + 0.01:  # > 1cm above ground
+                # Special case for ref_pieza: move to ground
+                obj.location.z = ground_z + 0.001
+                snapped += 1
+    if snapped > 0:
+        print(f"  📌 Post-physics snap: {snapped} pieces adjusted to ground.")
+
 def set_origin_to_center(obj):
     """Sets the origin of the object to its geometric center.
     This is critical because LDraw origins are often at the top/bottom or far from center,
@@ -234,11 +249,13 @@ def set_origin_to_center(obj):
     print(f"  🎯 Origin centered for {obj.name}")
 
 def setup_camera():
-    """Create a camera at 70cm height with 50mm lens to cover 50x50cm surface."""
-    # Camera at 70cm (0.7 units) to match user requirement
+    """Create a camera at 70cm height with 126mm lens to cover 20x20cm surface.
+    iPhone 16 @ 24MP zenithal reference: sensor 36mm, distance 70cm, FOV 20cm.
+    Lens = (sensor × distance) / field_width = (36 × 0.70) / 0.20 = 126mm
+    """
     bpy.ops.object.camera_add(location=(0, 0, 0.7))
     cam = bpy.context.object
-    cam.data.lens = 50             # 50mm at 0.7m covers ~50cm width on 36mm sensor
+    cam.data.lens = 126            # 126mm at 0.7m covers ~20cm width on 36mm sensor
     cam.data.sensor_width = 36.0   # Full-frame equivalent
     
     # Sharp Focus at 70cm
@@ -264,33 +281,37 @@ def setup_lighting():
     scenario = random.choice(['overhead', 'warm_side', 'cool_mixed', 'overcast', 'harsh', 'hdri_only', 'hdri_only'])
 
     if scenario == 'hdri_only':
-        print("  🌍 Scenario: Pure HDRI illumination.")
+        print("  🌍 Scenario: Pure HDRI illumination + Subtle Fill.")
+        # Add a very subtle overhead fill just to lift the deep shadows
+        bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
+        key = bpy.context.object
+        key.data.energy = random.uniform(100, 200)
         return scenario
 
     if scenario == 'overhead':
         # Studio overhead panel
         bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
         key = bpy.context.object
-        key.data.energy = random.uniform(500, 1000)
+        key.data.energy = random.uniform(600, 1000) # Boosted
         key.data.color = (1.0, random.uniform(0.92, 1.0), random.uniform(0.85, 1.0))
         key.scale = (1.5, 1.5, 1)
         # Weak fill from side
         bpy.ops.object.light_add(type='POINT', location=(random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), 0.8))
         fill = bpy.context.object
-        fill.data.energy = random.uniform(50, 300)
+        fill.data.energy = random.uniform(100, 250) # Boosted
 
     elif scenario == 'warm_side':
         # Warm sunlight from one side
         bpy.ops.object.light_add(type='AREA', location=(random.uniform(1.0, 1.5), random.uniform(-0.5, 0.5), random.uniform(0.8, 1.2)))
         key = bpy.context.object
-        key.data.energy = random.uniform(800, 1500)
-        key.data.color = (1.0, random.uniform(0.75, 0.90), random.uniform(0.55, 0.75))  # warm orange
+        key.data.energy = random.uniform(800, 1200) # Boosted
+        key.data.color = (1.0, random.uniform(0.80, 0.95), random.uniform(0.65, 0.80))  # subtle warm
         key.scale = (random.uniform(0.5, 1.0), random.uniform(0.5, 1.0), 1)
         key.rotation_euler = (0, random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5))
         # Soft fill opposite side
         bpy.ops.object.light_add(type='AREA', location=(-random.uniform(0.8, 1.2), 0, random.uniform(0.7, 1.0)))
         fill = bpy.context.object
-        fill.data.energy = random.uniform(100, 500)
+        fill.data.energy = random.uniform(200, 600) # Boosted
         fill.data.color = (random.uniform(0.7, 0.9), random.uniform(0.8, 1.0), 1.0)  # cool blue fill
 
     elif scenario == 'cool_mixed':
@@ -315,7 +336,7 @@ def setup_lighting():
             bpy.ops.object.light_add(type='AREA', location=(
                 random.uniform(-0.8, 0.8), random.uniform(-0.8, 0.8), random.uniform(1.0, 1.5)))
             l = bpy.context.object
-            l.data.energy = random.uniform(100, 300)
+            l.data.energy = random.uniform(200, 400) # Boosted
             l.data.color = (random.uniform(0.9, 1.0), random.uniform(0.9, 1.0), random.uniform(0.9, 1.0))
             l.scale = (random.uniform(4, 8), random.uniform(4, 8), 1)
 
@@ -324,13 +345,13 @@ def setup_lighting():
         bpy.ops.object.light_add(type='SPOT', location=(
             random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(0.8, 1.2)))
         key = bpy.context.object
-        key.data.energy = random.uniform(500, 1500)
+        key.data.energy = random.uniform(600, 1200) # Boosted
         key.data.spot_size = random.uniform(0.5, 1.2)
         key.data.color = (1.0, random.uniform(0.88, 1.0), random.uniform(0.80, 1.0))
         # Very subtle fill to avoid pure black shadows
         bpy.ops.object.light_add(type='POINT', location=(0, 0, 0.7))
         fill = bpy.context.object
-        fill.data.energy = random.uniform(20, 100)
+        fill.data.energy = random.uniform(50, 120) # Boosted
 
     print(f"  💡 Lighting scenario: '{scenario}'")
     
@@ -554,9 +575,9 @@ def setup_world_hdri(assets_dir):
     links.new(node_env.outputs['Color'], node_bg.inputs['Color'])
     links.new(node_bg.outputs['Background'], node_out.inputs['Surface'])
 
-    # Random Z Rotation and Intensity
+    # Random Z Rotation and Intensity - Balanced for stability
     node_mapping.inputs['Rotation'].default_value[2] = random.uniform(0, 6.28)
-    node_bg.inputs['Strength'].default_value = random.uniform(0.6, 1.4)
+    node_bg.inputs['Strength'].default_value = random.uniform(1.2, 1.8) # Boosted range
     print(f"  ✨ HDRI Strength: {node_bg.inputs['Strength'].default_value:.2f}")
 
 
@@ -645,90 +666,64 @@ def _apply_lego_material(obj, color_id=None):
     """Override all materials on obj (and children) with official LEGO ABS plastic."""
     if color_id is None:
         return
-    try:
-        # Lazy import to avoid errors when lego_colors is not on path
-        from lego_colors_blender import get_blender_rgba
-    except ImportError:
-        try:
-            # Fallback: inline hex lookup for the most common colors
-            _COMMON_COLORS = {
-                0: (0.106, 0.165, 0.204, 1.0),   # Black
-                1: (0.118, 0.353, 0.659, 1.0),   # Blue
-                2: (0.0, 0.522, 0.169, 1.0),     # Green
-                4: (0.706, 0.0, 0.0, 1.0),       # Red
-                14: (0.980, 0.784, 0.039, 1.0),  # Yellow
-                15: (0.957, 0.957, 0.957, 1.0),  # White
-                19: (0.843, 0.729, 0.549, 1.0),  # Tan
-                25: (0.839, 0.475, 0.137, 1.0),  # Orange
-                70: (0.373, 0.192, 0.035, 1.0),  # Reddish Brown
-                71: (0.588, 0.588, 0.588, 1.0),  # Light Bluish Grey
-                72: (0.392, 0.392, 0.392, 1.0),  # Dark Bluish Grey
-            }
-            get_blender_rgba = lambda cid: _COMMON_COLORS.get(cid, (0.8, 0.8, 0.8, 1.0))
-        except:
-            return
     
-    rgba = get_blender_rgba(color_id)
+    try:
+        # Use our new blender-specific color module
+        import lego_colors_blender
+        rgba = lego_colors_blender.get_blender_rgba(color_id)
+        if hasattr(lego_colors_blender, 'LEGO_COLORS_HEX'):
+             print(f"  🎨 Color mapped: {color_id} -> {lego_colors_blender.LEGO_COLORS_HEX.get(int(color_id), 'Default')}")
+    except Exception as e:
+        print(f"  ⚠️ Failed to use lego_colors_blender ({e}), using absolute default.")
+        rgba = (0.8, 0.8, 0.8, 1.0)
     
     def apply_to_object(o):
         if o.type == 'MESH' and o.data:
-            # Create or reuse a material
             mat_name = f"LEGO_Color_{color_id}"
             mat = bpy.data.materials.get(mat_name)
             if not mat:
                 mat = bpy.data.materials.new(name=mat_name)
                 mat.use_nodes = True
-                bsdf = mat.node_tree.nodes.get("Principled BSDF")
+                
+                # Find the Principled BSDF node by type
+                bsdf = None
+                for n in mat.node_tree.nodes:
+                    if n.type == 'BSDF_PRINCIPLED':
+                        bsdf = n
+                        break
+                
                 if bsdf:
-                    bsdf.inputs["Base Color"].default_value = rgba
-                    bsdf.inputs["Roughness"].default_value = 0.15  # ABS plastic
-                    bsdf.inputs["IOR"].default_value = 1.45        # ABS refractive index
-                    # Subsurface for plastic translucency
+                    # DISCONNECT any existing links to Base Color to ensure our value is used
+                    base_color_input = bsdf.inputs.get("Base Color")
+                    if base_color_input:
+                        for link in list(mat.node_tree.links):
+                            if link.to_socket == base_color_input:
+                                mat.node_tree.links.remove(link)
+                        base_color_input.default_value = rgba
+                    
+                    bsdf.inputs["Roughness"].default_value = 0.15
+                    bsdf.inputs["IOR"].default_value = 1.45
+                    
+                    # Subsurface logic
                     if "Subsurface Weight" in bsdf.inputs:
                         bsdf.inputs["Subsurface Weight"].default_value = 0.02
                     elif "Subsurface" in bsdf.inputs:
                         bsdf.inputs["Subsurface"].default_value = 0.02
-                    
-                    # ✨ Clearcoat: ABS gloss top layer (like factory-applied finish)
-                    if "Coat Weight" in bsdf.inputs:      # Blender 4.x+
+                        
+                    # Clearcoat
+                    if "Coat Weight" in bsdf.inputs:
                         bsdf.inputs["Coat Weight"].default_value = 0.1
                         bsdf.inputs["Coat Roughness"].default_value = 0.05
-                    elif "Clearcoat" in bsdf.inputs:      # Blender 3.x
+                    elif "Clearcoat" in bsdf.inputs:
                         bsdf.inputs["Clearcoat"].default_value = 0.1
                         bsdf.inputs["Clearcoat Roughness"].default_value = 0.05
-                    
-                    # 🍄 Noise Roughness: subtle imperfections to avoid mathematically perfect look
-                    # Connects Noise Texture → Math (Add, offset 0.15) → Roughness
-                    try:
-                        nodes = mat.node_tree.nodes
-                        links = mat.node_tree.links
-                        
-                        noise = nodes.new(type='ShaderNodeTexNoise')
-                        noise.inputs['Scale'].default_value = 200.0    # Very fine grain
-                        noise.inputs['Detail'].default_value = 4.0
-                        noise.inputs['Roughness'].default_value = 0.6
-                        noise.inputs['Distortion'].default_value = 0.1
-                        noise.location = (-600, -200)
-                        
-                        # Map 0-1 noise to [roughness-0.02, roughness+0.02] using ColorRamp
-                        ramp = nodes.new(type='ShaderNodeValToRGB')
-                        ramp.color_ramp.elements[0].position = 0.0
-                        ramp.color_ramp.elements[0].color = (0.13, 0.13, 0.13, 1.0)  # min roughness
-                        ramp.color_ramp.elements[1].position = 1.0
-                        ramp.color_ramp.elements[1].color = (0.17, 0.17, 0.17, 1.0)  # max roughness
-                        ramp.location = (-350, -200)
-                        
-                        links.new(noise.outputs['Fac'], ramp.inputs['Fac'])
-                        links.new(ramp.outputs['Color'], bsdf.inputs['Roughness'])
-                        print(f"  🌶️ Noise roughness texture applied for {mat_name}")
-                    except Exception as e:
-                        # Fallback: static roughness if node setup fails
-                        print(f"  ⚠️ Noise texture setup failed ({e}), using static roughness.")
-                        bsdf.inputs["Roughness"].default_value = 0.15
             
-            # Apply material to all slots
-            o.data.materials.clear()
-            o.data.materials.append(mat)
+            # Apply material to all existing slots to ensure full coverage
+            if not o.data.materials:
+                o.data.materials.append(mat)
+            else:
+                for i in range(len(o.data.materials)):
+                    o.data.materials[i] = mat
         
         for child in o.children:
             apply_to_object(child)
@@ -787,6 +782,26 @@ def get_hierarchy_corners(obj):
     for child in obj.children:
         corners.extend(get_hierarchy_corners(child))
     return corners
+
+def copy_hierarchy(obj, parent=None):
+    """Recursively copy an object and its children hierarchy."""
+    new_obj = obj.copy()
+    if obj.data:
+        new_obj.data = obj.data.copy()
+    
+    if parent:
+        new_obj.parent = parent
+    
+    bpy.context.collection.objects.link(new_obj)
+    
+    # Copy custom properties (class_id, ldraw_id, etc.)
+    for key, value in obj.items():
+        new_obj[key] = value
+    
+    for child in obj.children:
+        copy_hierarchy(child, parent=new_obj)
+    
+    return new_obj
 
 def get_hierarchy_vertices(obj):
     """Recursively find all vertices in an object hierarchy in world space."""
@@ -1001,15 +1016,15 @@ def main():
             except TypeError:
                 continue
         
-        # Protect whites: slight underexposure so stud sockets stay grey (not blown out)
-        bpy.context.scene.view_settings.exposure = -0.3
-        bpy.context.scene.view_settings.gamma = 1.05
+        # Balanced exposure: not too dark, not too bright
+        bpy.context.scene.view_settings.exposure = -0.15
+        bpy.context.scene.view_settings.gamma = 1.0
         bpy.context.scene.sequencer_colorspace_settings.name = 'sRGB'
     except Exception as e:
         print(f"Warning: Could not set color management: {e}")
 
-    # Create Ground Plane (50x50cm)
-    bpy.ops.mesh.primitive_plane_add(size=0.5, location=(0, 0, 0))
+    # Create Ground Plane (20x20cm — matches iPhone 16 FOV at 70cm)
+    bpy.ops.mesh.primitive_plane_add(size=0.2, location=(0, 0, 0))
     ground = bpy.context.object
     
     # Configure Rigid Body World for high accuracy with small LEGO parts
@@ -1043,45 +1058,65 @@ def main():
     # 🌑 Setup Ground Texture (Scanned Textures)
     setup_ground_texture(ground, assets_dir)
     
-    # Ensure it maps correctly (zenithal cam + 50x50cm plane + 50x50cm image = perfect fit usually)
-    # If UVs are needed, the default plane has them [0,1].
+    # Ensure it maps correctly (zenithal cam + 20x20cm plane = perfect fit)
 
-
-
-    # --- CONFIGURATION FOR HIGH DENSITY (50x50m REAL WORLD SCALE) ---
-    # User Request: 50x50cm area, 70cm height camera. 
-    # With a 36mm sensor width (Blender default), to capture 50cm at 70cm distance,
-    # the focal length (lens) = (Sensor * Distance) / FieldWidth = (36 * 70) / 50 = 50.4mm
+    # --- CONFIGURATION FOR 20x20cm ZONE (iPhone 16 @ 24MP) ---
+    # Lens = (36 × 0.70) / 0.20 = 126mm → covers exactly 20x20cm at 70cm
     
-    PARTS_PER_TYPE = data.get('parts_per_type', 40) # Increased to 40 for higher YOLO density
+    # Read render mode from config: 'images_mix' or 'ref_pieza'
+    render_mode = data.get('render_mode', 'images_mix')
+    PARTS_PER_IMAGE = data.get('parts_per_image', 20)  # For images_mix mode
     
     # 1. Setup Camera (Fixed Zenithal Centered)
-    # Surface is 50x50cm centered at 0,0.
+    # Surface is 20x20cm centered at 0,0.
     cam.location = (0, 0, 0.70) 
     cam.rotation_euler = (0, 0, 0) 
     cam.data.sensor_width = 36.0 # Ensure standard full-frame sensor
-    cam.data.lens = 50.4 # Exact math to capture 50x50 area
+    cam.data.lens = 126.0 # 126mm to capture 20x20cm area at 70cm
 
     # Initialize Resolver
     resolver = LDrawResolver(ldraw_path_base)
-    print(f"DEBUG: Resolver initialized. Methods: {dir(resolver)}")    
+    print(f"🔧 Render mode: {render_mode} | Parts per image: {PARTS_PER_IMAGE}")    
 
 
     # Iterate pieces to setup meshes and render engine
+    # --- BEVEL LOD (Level of Detail) ---
+    def apply_bevel_lod(obj, render_res=800, camera_fov_m=0.20):
+        """Reduce bevel segments on small objects to speed up rendering."""
+        try:
+            bpy.context.view_layer.update()
+            dims = obj.dimensions  # World-space size in metres
+            screen_fraction = max(dims.x, dims.y) / camera_fov_m
+            pixel_size = screen_fraction * render_res
+            for mod in obj.modifiers:
+                if mod.type == 'BEVEL':
+                    if pixel_size < 80:
+                        mod.segments = 1  # Very small piece (<80px)
+                    elif pixel_size < 150:
+                        mod.segments = 2  # Medium piece (80-150px)
+                    # Else: keep original segments for large pieces
+            # Also recurse into children
+            for child in obj.children:
+                apply_bevel_lod(child, render_res, camera_fov_m)
+        except Exception as e:
+            print(f"  ⚠️ Bevel LOD skipped for {obj.name}: {e}")
+
+    # --- GLOBAL RENDER SETUP ---
+    # Setup once for the whole run to avoid driver overhead in loops
+    first_pc = pieces_config[0] if pieces_config else {'engine': 'CYCLES', 'res': 800}
+    setup_render_engine(engine=first_pc.get('engine', 'CYCLES'), resolution=(first_pc.get('res', 800), first_pc.get('res', 800)))
+    
     for i, pc in enumerate(pieces_config):
         part = pc['part']
         ldraw_id = part['ldraw_id']
-        color_id = part.get('color_id', None)  # NEW: Read color_id from config
+        color_id = part.get('color_id', None)
+        color_name = part.get('color_name', None)
         num_images = pc['imgs']
         engine = pc['engine']
         res = pc['res']
         
-        color_info = f" | Color: {color_id}" if color_id is not None else ""
-        print(f"\n🚀 Blender started for piece {ldraw_id}{color_info} | Tier: {pc['tier']} | Engine: {engine} | Imgs: {num_images}")
-        
-        # Switch engine dynamically if needed
-        setup_render_engine(engine=engine, resolution=(res, res))
-        part_name = f"{ldraw_id}.dat"
+        color_info = f" | Color: {color_id} ({color_name or 'n/a'})" if color_id is not None else ""
+        print(f"\n🚀 Loading part {ldraw_id}{color_info} | Tier: {pc['tier']}")
         
         # Strategy C: Universal Detector mode forces all class IDs to 0
         if os.environ.get("UNIVERSAL_DETECTOR", "0") == "1":
@@ -1103,18 +1138,24 @@ def main():
                 addon_path
             )
             if minifig_root:
-                unique_meshes.append({'obj': minifig_root, 'id': class_id, 'color_id': color_id})
+                unique_meshes.append({'obj': minifig_root, 'id': class_id, 'color_id': color_id, 'color_name': color_name, 'ldraw_id': ldraw_id})
                 minifig_root.location = (0, 0, -10)
         elif part_path:
             obj = import_ldraw_part(part_path, ldraw_path_base, color_id=color_id)
             if obj:
+                print(f"PROGRESS: Loading templates {i+1}/{len(pieces_config)}")
+                print(f"  📥 Loaded template: {ldraw_id}")
                 set_origin_to_center(obj) # CRITICAL: Rotate around center, not LDraw anchor
-                unique_meshes.append({'obj': obj, 'id': class_id, 'color_id': color_id})
+                apply_bevel_lod(obj, render_res=first_pc.get('res', 800))
+                unique_meshes.append({'obj': obj, 'id': class_id, 'color_id': color_id, 'color_name': color_name, 'ldraw_id': ldraw_id})
                 obj.location = (0, 0, -10) # move template out of sight
+            else:
+                print(f"  ⚠️ Failed to load template: {ldraw_id}")
         else:
+            print(f"  ⚠️ Part path not found for: {ldraw_id}")
             continue
             
-    # Function to get the max dimension in XY plane to prevent clipping out of the 50x50cm surface
+    # Function to get the max dimension in XY plane to prevent clipping out of the 20x20cm surface
     def get_max_xy_radius(obj):
         corners = get_hierarchy_corners(obj)
         if not corners: return 0.02 # Default 2cm
@@ -1125,72 +1166,152 @@ def main():
             if r > max_r: max_r = r
         return max_r
 
-    for template in unique_meshes:
-        template_obj = template['obj']
-        class_id = template['id']
+    # ═══════════════════════════════════════════════════════════
+    # MODE: ref_pieza — Single piece centered, 360° rotation
+    # ═══════════════════════════════════════════════════════════
+    if render_mode == 'ref_pieza':
+        print("📸 MODE: ref_pieza — Single piece reference renders")
+        if not unique_meshes:
+            print("❌ No meshes loaded for ref_pieza mode.")
+        else:
+            # Use the first (and only) piece
+            template = unique_meshes[0]
+            template_obj = template['obj']
+            class_id = template['id']
+            ldraw_id_ref = template_obj.get('ldraw_id', set_id)
+            color_id_ref = template.get('color_id', -1)
+            color_name_ref = template.get('color_name') or ''
+            
+            # Place piece at center of the 20x20cm zone
+            template_obj.location = (0, 0, 0.001)  # Just above ground
+            set_origin_to_center(template_obj)
+            
+            # 300 images: Full random 3D rotations and ground snapping
+            ref_n_images = data.get('ref_num_images', 300)
+            
+            img_count = 0
+            offset_idx = data.get('offset_idx', 0)
+            worker_id = data.get('worker_id', '')
+            prefix_base = f"w{worker_id}_" if worker_id != '' else ""
+            
+            # --- PHYSICS STABILITY SETUP ---
+            SETTLE_FRAMES = 150
+            num_drops = 30
+            rots_per_face = max(1, ref_n_images // num_drops)
+            
+            # Setup Rigid Body for the template
+            bpy.context.view_layer.objects.active = template_obj
+            if not template_obj.rigid_body:
+                bpy.ops.rigidbody.object_add()
+            template_obj.rigid_body.type = 'ACTIVE'
+            # Convex Hull is faster and accurate enough for stable resting faces
+            template_obj.rigid_body.collision_shape = 'CONVEX_HULL'
+            template_obj.rigid_body.friction = 1.0
+            template_obj.rigid_body.restitution = 0.0
+            template_obj.rigid_body.linear_damping = 0.6
+            template_obj.rigid_body.angular_damping = 0.6
+
+            scene = bpy.context.scene
+            for d in range(num_drops):
+                # Reset simulation for each drop
+                scene.frame_set(1)
+                bpy.ops.ptcache.free_bake_all()
+                
+                # 1. Random Toss (Drop from 5cm)
+                template_obj.location = (0, 0, 0.05)
+                template_obj.rotation_euler = (
+                    random.uniform(0, 6.28),
+                    random.uniform(0, 6.28),
+                    random.uniform(0, 6.28)
+                )
+                
+                # 2. Settle Simulation
+                for f in range(1, SETTLE_FRAMES + 1):
+                    scene.frame_set(f)
+                
+                # Post-physics snap for ground contact
+                snap_to_ground([template_obj])
+                
+                # 3. Capture N Z-rotations per face
+                for r in range(rots_per_face):
+                    # Z-axis rotation to capture the same stable face from different angles
+                    template_obj.rotation_euler[2] += (6.28 / rots_per_face) + random.uniform(-0.05, 0.05)
+                    bpy.context.view_layer.update()
+                    
+                    # Vary lighting and background every 4 images
+                    if img_count % 4 == 0:
+                        setup_lighting()
+                        setup_world_hdri(assets_dir)
+                        ground_obj = bpy.data.objects.get("Plane")
+                        if ground_obj:
+                            setup_ground_texture(ground_obj, assets_dir)
+                
+                    # Render
+                    if not scene.camera:
+                        scene.camera = bpy.data.objects.get("Camera")
+                    
+                    img_idx = img_count + offset_idx
+                    img_prefix = f"{prefix_base}img_{img_idx:04d}"
+                    render_path = os.path.join(images_dir, f"{img_prefix}.jpg")
+                    scene.render.filepath = render_path
+                    
+                    if img_count % 20 == 0 or img_count == ref_n_images - 1:
+                        print(f"PROGRESS: {img_count + 1}/{ref_n_images} (Physics Stable Snap)")
+                    
+                    bpy.ops.render.render(write_still=True)
+                    
+                    # Generate label for centered piece
+                    label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
+                    camera = scene.camera
+                    
+                    # Recalculate vertices after position update for labels
+                    verts_3d = get_hierarchy_vertices(template_obj)
+                    if verts_3d:
+                        coords_2d = [world_to_camera_view(scene, camera, coord) for coord in verts_3d]
+                        visible_points = []
+                        for c in coords_2d:
+                            if c.z > 0:
+                                cx = max(0.0, min(1.0, c.x))
+                                cy = max(0.0, min(1.0, c.y))
+                                visible_points.append((cx, cy))
+                        
+                        hull = get_convex_hull(visible_points) if len(visible_points) >= 3 else []
+                        
+                        with open(label_path, 'w') as lf:
+                            if hull and len(hull) >= 3:
+                                pts = []
+                                for corner in hull:
+                                    px = max(0.0, min(1.0, corner[0]))
+                                    py = max(0.0, min(1.0, 1.0 - corner[1]))
+                                    pts.extend([f"{px:.6f}", f"{py:.6f}"])
+                                lf.write(f"{class_id} {' '.join(pts)}\n")
+                    
+                    # Metadata
+                    meta_path = os.path.join(output_base, "image_meta.jsonl")
+                    with open(meta_path, 'a') as mf:
+                        mf.write(json.dumps({
+                            "img": f"{img_prefix}.jpg",
+                            "ids": [ldraw_id_ref],
+                            "color_ids": [color_id_ref],
+                            "color_names": [color_name_ref]
+                        }) + "\n")
+                    
+                    img_count += 1
+            
+            print(f"✅ ref_pieza complete: {img_count} images rendered for piece {ldraw_id_ref}")
         
-        # Calculate safety margin for this specific part
-        part_radius = get_max_xy_radius(template_obj)
-        # Surface is 0.5x0.5m, so bounds are +/- 0.25m.
-        # Safe range is 0.25 - radius - small buffer
-        safe_limit = max(0.01, 0.25 - part_radius - 0.005)
-        
-        for n in range(PARTS_PER_TYPE):
-            # Duplicate
-            new_obj = template_obj.copy()
-            if template_obj.data:
-                new_obj.data = template_obj.data.copy()
-            bpy.context.collection.objects.link(new_obj)
-            
-            # Position Randomly but strictly WITHIN the 50x50cm mat
-            new_obj.location = (
-                random.uniform(-safe_limit, safe_limit), 
-                random.uniform(-safe_limit, safe_limit), 
-                random.uniform(0.005, 0.04)  # FIX: Very low drop (5mm-4cm) for surface scatter
-            )
-            # Orientation diversity: force ~40% of pieces to start lying flat
-            # so physics settles them in horizontal orientations too
-            orientation_roll = random.random()
-            if orientation_roll < 0.40:
-                # Pre-tilt 90 deg on X or Y to force flat landing
-                tilt_axis = random.choice(['x', 'y'])
-                base_angle = random.choice([math.pi / 2, -math.pi / 2, math.pi])
-                if tilt_axis == 'x':
-                    new_obj.rotation_euler = (base_angle, random.uniform(-0.3, 0.3), random.uniform(0, 6.28))
-                else:
-                    new_obj.rotation_euler = (random.uniform(-0.3, 0.3), base_angle, random.uniform(0, 6.28))
-            else:
-                # Full random rotation
-                new_obj.rotation_euler = (random.uniform(0, 6.28), random.uniform(0, 6.28), random.uniform(0, 6.28))
-            
-            # Physics — Optimized for ground contact and 0-bounce diversity
-            bpy.context.view_layer.objects.active = new_obj
-            bpy.ops.rigidbody.object_add()
-            new_obj.rigid_body.type = 'ACTIVE'
-            new_obj.rigid_body.mass = 0.05
-            new_obj.rigid_body.friction = 1.0              # Max friction to stay where it lands
-            new_obj.rigid_body.collision_shape = 'CONVEX_HULL'
-            new_obj.rigid_body.use_margin = True
-            new_obj.rigid_body.collision_margin = 0.0001
-            new_obj.rigid_body.restitution = 0.0           # ZERO bounce: stays in stable pose
-            new_obj.rigid_body.linear_damping = 0.9        # High damping
-            new_obj.rigid_body.angular_damping = 0.9       # Stops spinning quickly
-            
-            new_obj['class_id'] = class_id
-            new_obj['ldraw_id'] = ldraw_id
-            new_obj['color_id_lego'] = template.get('color_id', -1)  # NEW: Propagate color
-            new_obj['safe_limit'] = safe_limit # Store for re-shuffling
-            physics_objects.append(new_obj)
-            total_spawned += 1
-            
+        print("Blender script finished.")
+        return  # Exit early for ref_pieza mode
+    
     # VALIDATION: Check if objects were imported
-    if total_spawned == 0:
+    if len(unique_meshes) == 0:
         msg = "❌ CRITICAL ERROR: No LEGO pieces were imported or spawned into the scene. Aborting render."
         print(msg)
         raise Exception(msg)
     
-    print(f"✅ Successfully spawned {total_spawned} pieces ( {len(unique_meshes)} unique types).")
-            
+    if render_mode == 'images_mix':
+        print(f"🎲 MODE: images_mix — Ready to dynamically spawn from {len(unique_meshes)} piece types per drop.")
+
     # Hide templates again or delete?
     # Keeping them far away is fine.
 
@@ -1198,7 +1319,6 @@ def main():
     resolver.save_report(output_base)
 
     # Simulation Loop
-    import bpy_extras
     
     scene = bpy.context.scene
     
@@ -1209,37 +1329,85 @@ def main():
     
     offset_idx = data.get('offset_idx', 0)
     
-    # ─── Post-Physics Snap Function ───
-    def snap_to_ground(objects, ground_z=0.0, max_hover=0.003):
-        """Force any piece still hovering above max_hover down to ground contact.
-        This is a safety net after the physics simulation."""
-        snapped = 0
-        for obj in objects:
-            if obj.location.z > ground_z + max_hover:
-                # Check if piece is supposed to rest on another piece
-                # Only snap if significantly above ground and not stacked
-                if obj.location.z > ground_z + 0.01:  # > 1cm above ground
-                    obj.location.z = ground_z + 0.001  # Place just above surface
-                    snapped += 1
-        if snapped > 0:
-            print(f"  📌 Post-physics snap: {snapped} pieces adjusted to ground.")
-    # ─────────────────────────────────
+    # ─── Post-Physics Snap Function (Moved to global scope) ───
+    # ──────────────────────────────────────────────────────────
     
     # We will do 2 variations (lighting/jitter) per physical drop to save CPU time
     # Total physical drops = num_images // 2
     num_drops = max(1, num_images // 2)
     
     for drop_idx in range(num_drops):
-        # 4a. Reset Positions (Shuffle)
         scene.frame_set(1)
         bpy.ops.ptcache.free_bake_all()
         
-        for obj in physics_objects:
-            limit = obj.get('safe_limit', 0.20)
+        # 🎲 Dynamically spawn pieces from available types to reach PARTS_PER_IMAGE
+        available_templates = unique_meshes
+        
+        # Variety Logic: How many distinct types in this image?
+        # Target 75% of available types, but cannot exceed the total number of physical pieces planned
+        K = min(PARTS_PER_IMAGE, max(1, int(len(available_templates) * 0.75)))
+        # If we have very few types (< 5), just use all of them
+        if len(available_templates) < 5:
+            K = len(available_templates)
+            
+        selected_templates = random.sample(available_templates, K)
+        
+        active_pieces = []
+        selected_class_ids = []
+        
+        # Distribute PARTS_PER_IMAGE across the K selected templates
+        # Ensure equitable distribution with remainders
+        base_instances = PARTS_PER_IMAGE // K
+        extra_instances = PARTS_PER_IMAGE % K
+        
+        for i, template in enumerate(selected_templates):
+            num_to_spawn = base_instances + (1 if i < extra_instances else 0)
+            
+            template_obj = template['obj']
+            class_id = template['id']
+            t_ldraw_id = template['ldraw_id']
+            color_id = template.get('color_id', -1)
+            color_name = template.get('color_name') or ''
+            selected_class_ids.append(str(class_id))
+            
+            part_radius = get_max_xy_radius(template_obj)
+            safe_limit = max(0.005, 0.10 - part_radius - 0.003)
+            
+            for _ in range(num_to_spawn):
+                new_obj = copy_hierarchy(template_obj)
+                
+                new_obj['class_id'] = class_id
+                new_obj['ldraw_id'] = t_ldraw_id
+                new_obj['color_id_lego'] = color_id
+                new_obj['color_name_lego'] = color_name
+                new_obj['safe_limit'] = safe_limit
+                
+                new_obj.hide_render = False
+                
+                # Enable physics
+                bpy.context.view_layer.objects.active = new_obj
+                bpy.ops.rigidbody.object_add()
+                new_obj.rigid_body.type = 'ACTIVE'
+                new_obj.rigid_body.collision_shape = 'CONVEX_HULL'
+                new_obj.rigid_body.friction = 1.0
+                new_obj.rigid_body.restitution = 0.0
+                
+                active_pieces.append(new_obj)
+        
+        bpy.context.view_layer.update()
+        
+        selected_types_str = ', '.join([str(t['ldraw_id']) for t in selected_templates])
+        print(f"  🏁 Drop {drop_idx+1}: {len(active_pieces)} pieces from types: {selected_types_str} (Classes: {', '.join(selected_class_ids)})")
+
+        for obj in active_pieces:
+            
+            # Place at safe height for drop
+            limit = obj.get('safe_limit', 0.08)
+            base_z = random.uniform(0.003, 0.025)
             obj.location = (
                 random.uniform(-limit, limit), 
                 random.uniform(-limit, limit), 
-                random.uniform(0.005, 0.035)  # FIX: Very low scatter drop
+                base_z
             )
             # Orientation diversity: force ~40% to start lying flat
             orientation_roll = random.random()
@@ -1252,19 +1420,25 @@ def main():
                     obj.rotation_euler = (random.uniform(-0.3, 0.3), base_angle, random.uniform(0, 6.28))
             else:
                 obj.rotation_euler = (random.uniform(0, 6.28), random.uniform(0, 6.28), random.uniform(0, 6.28))
+
+        bpy.context.view_layer.update()
         
         # 4b. Run Settle Simulation — frame-by-frame for stability
         for frame in range(1, SETTLE_FRAMES + 1):
             scene.frame_set(frame)
+            if frame == 1:
+                bpy.context.view_layer.update()
         bpy.context.view_layer.update()
         
         # 4b.1 Post-Physics Safety Snap
-        snap_to_ground(physics_objects)
+        snap_to_ground(active_pieces)
         
         # 4b.2 Post-Physics Z-rotation jitter (adds 2D diversity as seen from top-down camera)
-        for obj in physics_objects:
+        for obj in active_pieces:
             current_z = obj.rotation_euler[2]
             obj.rotation_euler[2] = current_z + random.uniform(-0.5, 0.5)  # ~+/-30deg Z jitter
+            
+        bpy.context.view_layer.update()
         
         # 4c. Render 2 variations per drop (Lighting diversity)
         for var_idx in range(2):
@@ -1285,9 +1459,16 @@ def main():
             
             # If empty background, move pieces out of view
             if is_empty_background:
-                for obj in physics_objects:
-                    obj.location.z = -100 # Move them below the floor
-                bpy.context.view_layer.update()
+                for obj in active_pieces: # Only active ones matter
+                    obj.hide_render = True
+                    obj.location.z -= 100.0 # Move them way below the floor
+            else:
+                # Ensure they are visible (they might have been hidden by a previous variation)
+                for obj in active_pieces:
+                    obj.hide_render = False
+                    # Z will be restored after the render/labeling loop if it was moved
+            
+            bpy.context.view_layer.update()
 
             # Render - Ensure camera is active
             if not scene.camera:
@@ -1316,17 +1497,24 @@ def main():
                 if not is_empty_background:
                     active_ids_in_image = []
                     active_colors_in_image = []
-                    for obj in physics_objects: # Iterate over all spawned physics objects
+                    print(f"  🔍 Labeling call: {len(active_pieces)} active pieces.")
+                    for obj in active_pieces: # Iterate only over visible/active pieces!
+                        # print(f"    - Processing {obj.name} at Z={obj.location.z:.2f}")
                         camera = scene.camera
                         
                         # For OBB, using vertices is much more accurate than the 8 bounding box corners
                         # because the real shape limits the tight OBB fit.
                         verts_3d = get_hierarchy_vertices(obj)
                         if not verts_3d:
+                            if not is_empty_background:
+                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) NO VERTICES | children={len(obj.children)}")
                             continue
+                        else:
+                            if not is_empty_background:
+                                print(f"  📝 Piece {obj.name} ({obj.get('ldraw_id')}) has {len(verts_3d)} verts from {len(obj.children)} immediate children")
                     
                         # Project vertices to 2D
-                        coords_2d = [bpy_extras.object_utils.world_to_camera_view(scene, camera, coord) for coord in verts_3d]
+                        coords_2d = [world_to_camera_view(scene, camera, coord) for coord in verts_3d]
                         
                         # Filter visible coords and clamp to 0-1 bounds
                         visible_points = []
@@ -1335,17 +1523,25 @@ def main():
                                 cx, cy = max(0.0, min(1.0, c.x)), max(0.0, min(1.0, c.y))
                                 visible_points.append((cx, cy))
                                 
-                        if not visible_points: continue
+                        if not visible_points: 
+                            if not is_empty_background:
+                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) NOT VISIBLE at Z={obj.location.z:.4f}")
+                            continue
                         
                         # Calculate Convex Hull for Instance Segmentation (Polygon Mask)
                         hull = get_convex_hull(visible_points)
                         
-                        if not hull or len(hull) < 3: continue
+                        if not hull or len(hull) < 3:
+                            if not is_empty_background:
+                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) INVALID HULL (len={len(hull) if hull else 0})")
+                            continue
                         
                         # Check area size to filter microscopic noise
                         xs = [p[0] for p in hull]
                         ys = [p[1] for p in hull]
                         if (max(xs) - min(xs)) < 0.002 or (max(ys) - min(ys)) < 0.002:
+                            if not is_empty_background:
+                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) TOO SMALL (size={(max(xs)-min(xs)):.4f}x{(max(ys)-min(ys)):.4f}) at Z={obj.location.z:.4f}")
                             continue
                             
                         # Write YOLO Segmentation format (class x1 y1 x2 y2 ... xn yn)
@@ -1359,20 +1555,43 @@ def main():
                                 pts.extend([f"{px:.6f}", f"{py:.6f}"])
                                 
                             lf.write(f"{obj['class_id']} {' '.join(pts)}\n")
-                            # Track which real part ID and color is at which index
+                            if not is_empty_background:
+                                print(f"  ✅ Labeled {obj.name} ({obj.get('ldraw_id')}) at Z={obj.location.z:.4f}")
+                            # Track which real part ID, color and color_name is in this image
                             active_ids_in_image.append(obj.get('ldraw_id', 'unknown'))
                             active_colors_in_image.append(obj.get('color_id_lego', -1))
                     
                     # Log real IDs + colors for this image to image_meta.jsonl
                     if active_ids_in_image:
+                        active_color_names = [
+                            obj.get('color_name_lego', '') for obj in active_pieces
+                            if 'class_id' in obj and not obj.hide_render
+                        ]
                         with open(meta_path, 'a') as mf:
                             mf.write(json.dumps({
                                 "img": f"{img_prefix}.jpg", 
                                 "ids": active_ids_in_image,
-                                "color_ids": active_colors_in_image
+                                "color_ids": active_colors_in_image,
+                                "color_names": active_color_names
                             }) + "\n")
+            
+            # Restore Z position if it was a negative sample
+            if is_empty_background:
+                for obj in active_pieces:
+                    obj.location.z += 100.0 # Return to ground level
+                bpy.context.view_layer.update()
 
-    # Note: data.yaml is now generated by the calling logic (generator.py) 
+        # CLEANUP: Delete the dynamically spawned pieces for this drop
+        def select_hierarchy(o):
+            o.select_set(True)
+            for c in o.children:
+                select_hierarchy(c)
+                
+        bpy.ops.object.select_all(action='DESELECT')
+        for obj in active_pieces:
+            if obj.name in bpy.data.objects:
+                select_hierarchy(obj)
+        bpy.ops.object.delete()    # Note: data.yaml is now generated by the calling logic (generator.py) 
     # to correctly handle merged datasets across multiple workers.
     print("Blender script finished.")
 

@@ -1,5 +1,0 @@
-path: /Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/render_local/32000
-train: images
-val: images
-nc: 1
-names: ['lego']

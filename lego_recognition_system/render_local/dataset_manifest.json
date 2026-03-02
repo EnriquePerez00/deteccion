@@ -1,237 +1,101 @@
 {
-  "generated_at": "2026-03-01T18:27:23.845652",
-  "duration_minutes": 9.3,
-  "total_pieces": 38,
-  "total_images": 3262,
-  "duplicates_removed": 80,
+  "generated_at": "2026-03-02T18:01:40.513856",
+  "duration_minutes": 0.7,
+  "render_mode": "ref_pieza",
+  "total_pieces": 13,
+  "total_images": 4050,
+  "duplicates_removed": 0,
   "pieces": [
     {
-      "piece_id": "28653",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "28653/data.yaml"
-    },
-    {
-      "piece_id": "2449",
-      "images": 76,
-      "labels": 76,
-      "data_yaml": "2449/data.yaml"
-    },
-    {
-      "piece_id": "11055",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "11055/data.yaml"
-    },
-    {
-      "piece_id": "3024",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "3024/data.yaml"
-    },
-    {
-      "piece_id": "3022",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "3022/data.yaml"
-    },
-    {
-      "piece_id": "3680",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "3680/data.yaml"
-    },
-    {
-      "piece_id": "3839b",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "3839b/data.yaml"
-    },
-    {
-      "piece_id": "51739",
-      "images": 76,
-      "labels": 76,
-      "data_yaml": "51739/data.yaml"
-    },
-    {
-      "piece_id": "3832",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "3832/data.yaml"
-    },
-    {
-      "piece_id": "87620",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "87620/data.yaml"
-    },
-    {
-      "piece_id": "4073",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "4073/data.yaml"
-    },
-    {
-      "piece_id": "2654a",
-      "images": 77,
-      "labels": 77,
-      "data_yaml": "2654a/data.yaml"
-    },
-    {
       "piece_id": "15391",
-      "images": 75,
-      "labels": 75,
-      "data_yaml": "15391/data.yaml"
-    },
-    {
-      "piece_id": "30414",
-      "images": 77,
-      "labels": 77,
-      "data_yaml": "30414/data.yaml"
-    },
-    {
-      "piece_id": "2445",
-      "images": 76,
-      "labels": 76,
-      "data_yaml": "2445/data.yaml"
-    },
-    {
-      "piece_id": "3795",
-      "images": 148,
-      "labels": 148,
-      "data_yaml": "3795/data.yaml"
-    },
-    {
-      "piece_id": "2419",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "2419/data.yaml"
-    },
-    {
-      "piece_id": "2877",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "2877/data.yaml"
-    },
-    {
-      "piece_id": "60481a",
-      "images": 148,
-      "labels": 148,
-      "data_yaml": "60481a/data.yaml"
-    },
-    {
-      "piece_id": "3040b",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "3040b/data.yaml"
-    },
-    {
-      "piece_id": "3020",
-      "images": 76,
-      "labels": 76,
-      "data_yaml": "3020/data.yaml"
-    },
-    {
-      "piece_id": "61780",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "61780/data.yaml"
-    },
-    {
-      "piece_id": "3679",
-      "images": 77,
-      "labels": 77,
-      "data_yaml": "3679/data.yaml"
-    },
-    {
-      "piece_id": "61184",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "61184/data.yaml"
-    },
-    {
-      "piece_id": "2412b",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "2412b/data.yaml"
-    },
-    {
-      "piece_id": "85984",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "85984/data.yaml"
-    },
-    {
-      "piece_id": "32000",
-      "images": 168,
-      "labels": 168,
-      "data_yaml": "32000/data.yaml"
-    },
-    {
-      "piece_id": "32054",
-      "images": 136,
-      "labels": 136,
-      "data_yaml": "32054/data.yaml"
+      "mode": "ref_pieza",
+      "images": 300,
+      "labels": 300,
+      "data_yaml": "ref_pieza/15391/data.yaml"
     },
     {
       "piece_id": "3004",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "3004/data.yaml"
+      "mode": "ref_pieza",
+      "images": 300,
+      "labels": 300,
+      "data_yaml": "ref_pieza/3004/data.yaml"
+    },
+    {
+      "piece_id": "3023",
+      "mode": "ref_pieza",
+      "images": 299,
+      "labels": 299,
+      "data_yaml": "ref_pieza/3023/data.yaml"
+    },
+    {
+      "piece_id": "3024",
+      "mode": "ref_pieza",
+      "images": 281,
+      "labels": 281,
+      "data_yaml": "ref_pieza/3024/data.yaml"
+    },
+    {
+      "piece_id": "3040b",
+      "mode": "ref_pieza",
+      "images": 300,
+      "labels": 300,
+      "data_yaml": "ref_pieza/3040b/data.yaml"
+    },
+    {
+      "piece_id": "3679",
+      "mode": "ref_pieza",
+      "images": 267,
+      "labels": 267,
+      "data_yaml": "ref_pieza/3679/data.yaml"
+    },
+    {
+      "piece_id": "3795",
+      "mode": "ref_pieza",
+      "images": 300,
+      "labels": 300,
+      "data_yaml": "ref_pieza/3795/data.yaml"
+    },
+    {
+      "piece_id": "3839b",
+      "mode": "ref_pieza",
+      "images": 300,
+      "labels": 300,
+      "data_yaml": "ref_pieza/3839b/data.yaml"
+    },
+    {
+      "piece_id": "4073",
+      "mode": "ref_pieza",
+      "images": 144,
+      "labels": 144,
+      "data_yaml": "ref_pieza/4073/data.yaml"
     },
     {
       "piece_id": "6541",
-      "images": 80,
-      "labels": 80,
-      "data_yaml": "6541/data.yaml"
+      "mode": "ref_pieza",
+      "images": 295,
+      "labels": 295,
+      "data_yaml": "ref_pieza/6541/data.yaml"
     },
     {
-      "piece_id": "59900",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "59900/data.yaml"
+      "piece_id": "87620",
+      "mode": "ref_pieza",
+      "images": 299,
+      "labels": 299,
+      "data_yaml": "ref_pieza/87620/data.yaml"
     },
     {
-      "piece_id": "14769",
-      "images": 76,
-      "labels": 76,
-      "data_yaml": "14769/data.yaml"
+      "piece_id": "images_mix",
+      "mode": "images_mix",
+      "images": 963,
+      "labels": 963,
+      "data_yaml": "images_mix/data.yaml"
     },
     {
-      "piece_id": "2540",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "2540/data.yaml"
-    },
-    {
-      "piece_id": "15392",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "15392/data.yaml"
-    },
-    {
-      "piece_id": "3710",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "3710/data.yaml"
-    },
-    {
-      "piece_id": "2653",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "2653/data.yaml"
-    },
-    {
-      "piece_id": "87552",
-      "images": 78,
-      "labels": 78,
-      "data_yaml": "87552/data.yaml"
-    },
-    {
-      "piece_id": "3068b",
-      "images": 79,
-      "labels": 79,
-      "data_yaml": "3068b/data.yaml"
+      "piece_id": "test_patch",
+      "mode": "legacy",
+      "images": 2,
+      "labels": 2,
+      "data_yaml": "test_patch/data.yaml"
     }
   ]
 }

@@ -6,6 +6,15 @@ import urllib.request
 import ssl
 from pathlib import Path
 
+# Import color lookup for human-readable names
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent))
+    from lego_colors import LEGO_COLORS as _LEGO_COLORS, get_color_name as _get_color_name
+except ImportError:
+    _LEGO_COLORS = {}
+    def _get_color_name(cid): return f"Color {cid}"
+
 # Create an unverified context for macOS SSL issues
 ssl_ctx = ssl.create_default_context()
 ssl_ctx.check_hostname = False
@@ -97,11 +106,13 @@ class MinifigResolver:
                     clean_id = rb_id.split('p')[0].split('c')[0]
                     ldraw_id = self.mapping.get(clean_id, clean_id)
                 
+                color_id_val = item.get("color", {}).get("id", 0)
                 parts.append({
                     "rb_id": rb_id,
                     "ldraw_id": ldraw_id,
                     "name": p.get("name", ""),
-                    "color_id": item.get("color", {}).get("id", 0),
+                    "color_id": color_id_val,
+                    "color_name": _get_color_name(color_id_val),
                     "type": p.get("category", {}).get("name", "Unknown")
                 })
             

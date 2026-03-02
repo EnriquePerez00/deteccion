@@ -8,7 +8,7 @@ from src.logic.vector_index import VectorIndex
 from src.logic.lego_colors import get_color_onehot, get_num_colors, get_color_name
 from pathlib import Path
 
-def build_index(dataset_dir, output_folder, unified=True):
+def build_index(dataset_dir, output_folder, unified=True, force=False):
     """
     Builds or updates vector indices incrementally.
     """
@@ -23,6 +23,8 @@ def build_index(dataset_dir, output_folder, unified=True):
     if unified and os.path.exists(master_path):
         print(f"🔄 Found existing index. Loading to append new pieces...")
         unified_index.load(master_path)
+    
+    indexed_ids = unified_index.get_indexed_ids() if unified_index else set()
     # -------------------------
     
     piece_data = {} # ldraw_id -> {'embeddings': [], 'metadata': []}
@@ -163,13 +165,22 @@ def build_index(dataset_dir, output_folder, unified=True):
 
     # Save results
     if unified:
+        added_count = 0
         for ldraw_id, data in piece_data.items():
+            if not force and ldraw_id in indexed_ids:
+                print(f"   ⏭️ Piece {ldraw_id} already in index. Skipping append.")
+                continue
+            
             for emb in data['final_embeddings']:
                 unified_index.add(emb, {'ldraw_id': ldraw_id})
+                added_count += 1
         
-        out_path = os.path.join(output_folder, "lego.index")
-        unified_index.save(out_path)
-        print(f"✅ Unified index saved: {out_path} ({unified_index.index.ntotal} total instances)")
+        if added_count > 0:
+            out_path = os.path.join(output_folder, "lego.index")
+            unified_index.save(out_path)
+            print(f"✅ Unified index updated: {out_path} ({unified_index.index.ntotal} total instances)")
+        else:
+            print("   ℹ️ No new pieces to add to index.")
     else:
         for ldraw_id, data in piece_data.items():
             out_path = os.path.join(output_folder, f"{ldraw_id}.index")

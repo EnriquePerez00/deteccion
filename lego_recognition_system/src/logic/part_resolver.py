@@ -66,17 +66,19 @@ def resolve_set(set_id: str, max_parts: int = None) -> list:
     if not raw:
         raise ValueError(f"❌ Could not resolve set {set_id}. Check the set ID or add a JSON file at data/inventory/{set_id}.json")
 
-    # Deduplicate by ldraw_id (keep first occurrence with its color)
+    # Deduplicate by ldraw_id and color_id
     seen = {}
     for part in raw:
         lid = part.get("ldraw_id") or part.get("part_num")
-        if lid and lid not in seen:
-            seen[lid] = {
+        color_id = part.get("color_id", 15)
+        uid = f"{lid}_{color_id}"
+        if lid and uid not in seen:
+            seen[uid] = {
                 "ldraw_id": lid, 
                 "name": part.get("name", lid), 
                 "part_num": part.get("part_num", lid),
                 "category": part.get("category", ""),
-                "color_id": part.get("color_id", 15),
+                "color_id": color_id,
                 "color_name": part.get("color_name", "White"),
             }
 

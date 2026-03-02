@@ -231,76 +231,61 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
         st.error("❌ Los modelos no pudieron cargarse. Revisa los errores en el sidebar.")
         return
 
-    # ── PHASE 1: YOLO DETECTION ──────────────────────────────────────────────────
-    st.subheader("Fase 1 — Detección YOLO (Redimensión Inteligente 2K)")
+    # ── PHASE 1: YOLO DETECTION (SAHI — Slicing Aided Hyper Inference) ─────────
+    st.subheader("Fase 1 — Detección YOLO (SAHI — Tiled 24MP)")
 
-    with st.spinner("Preparando imagen (Letterbox 2048px)..."):
-        # INTEL-RESIZE: Convert to 2048x2048 with black padding to avoid deformation
-        orig_w, orig_h = image.size
-        target_size = 2048
-        scale = target_size / max(orig_w, orig_h)
-        new_w, new_h = int(orig_w * scale), int(orig_h * scale)
-        
-        # Resize maintaining aspect ratio
-        resized_img = image.resize((new_w, new_h), Image.LANCZOS)
-        
-        # Create black canvas 2048x2048
-        working_image = Image.new("RGB", (target_size, target_size), (0, 0, 0))
-        # Center the image
-        offset_x = (target_size - new_w) // 2
-        offset_y = (target_size - new_h) // 2
-        working_image.paste(resized_img, (offset_x, offset_y))
+    from src.logic.sahi_slicer import run_sahi_inference, generate_slices
 
-    with st.spinner("Ejecutando detector YOLO en 2K..."):
-        results = yolo.predict(working_image, conf=conf_threshold, agnostic_nms=True, verbose=False)
+    orig_w, orig_h = image.size
 
-    result = results[0] if results else None
-    use_masks = result is not None and hasattr(result, 'masks') and result.masks is not None
-    num_detections = (len(result.masks.xy) if use_masks
-                      else (len(result.boxes) if result is not None and result.boxes is not None else 0))
+    # Progress UI
+    sahi_status = st.empty()
+    sahi_progress = st.progress(0)
+
+    def _sahi_progress(current, total):
+        sahi_progress.progress(current / total)
+        sahi_status.text(f"🔪 Procesando tile {current}/{total}...")
+
+    with st.spinner("Ejecutando SAHI (tiled inference)..."):
+        final_detections = run_sahi_inference(
+            yolo, image,
+            conf_threshold=conf_threshold,
+            slice_size=1824,
+            overlap_ratio=0.30,
+            iou_threshold=0.5,
+            center_bonus=0.05,
+            progress_callback=_sahi_progress,
+        )
+
+    sahi_progress.progress(1.0)
+    sahi_status.text(f"✅ SAHI completo: {len(final_detections)} detecciones tras NMS global.")
+
+    num_detections = len(final_detections)
 
     # ── Debug info ───────────────────────────────────────────────────────────
-    with st.expander("🔍 Debug — Salida YOLO 2K", expanded=(num_detections == 0)):
-        st.markdown(f"**Escala aplicada:** `{scale:.4f}` | **Offset:** `({offset_x}, {offset_y})`")
-        if result is not None and result.boxes is not None and len(result.boxes) > 0:
-            raw_confs = result.boxes.conf.cpu().numpy()
-            st.bar_chart({"conf": raw_confs})
+    with st.expander("🔍 Debug — SAHI Info", expanded=(num_detections == 0)):
+        n_tiles = len(generate_slices(image, 1824, 0.30))
+        st.markdown(f"**Imagen:** `{orig_w}×{orig_h}` | **Tiles:** `{n_tiles}` (1824px, 30% overlap)")
+        if final_detections:
+            confs_arr = [d['conf'] for d in final_detections]
+            st.bar_chart({"conf": confs_arr})
 
     if num_detections == 0:
         st.warning(f"⚠️ No se detectaron piezas LEGO con confianza ≥ {conf_threshold:.0%}.")
         st.image(image, caption="Imagen original (sin detecciones)", use_container_width=True)
         return
 
-    # Extract & Scale back to Original Resolution
-    scaled_boxes = [] # Boxes in original high-res space
-    raw_boxes = result.boxes.xyxy.cpu().numpy()
-    confidences = result.boxes.conf.cpu().numpy()
-    
-    if use_masks:
-        raw_polygons = result.masks.xy
-        scaled_polygons = []
-        for poly in raw_polygons:
-            # Map back: (coord - offset) / scale
-            p_orig = []
-            for pt in poly:
-                px = (pt[0] - offset_x) / scale
-                py = (pt[1] - offset_y) / scale
-                p_orig.append([px, py])
-            p_orig = np.array(p_orig)
-            scaled_polygons.append(p_orig)
-            
-            # Recalculate bounding box in original space
-            min_x, max_x = np.min(p_orig[:, 0]), np.max(p_orig[:, 0])
-            min_y, max_y = np.min(p_orig[:, 1]), np.max(p_orig[:, 1])
-            scaled_boxes.append([min_x, min_y, max_x, max_y])
+    # Build scaled_boxes, scaled_polygons, confidences from SAHI results
+    # (coordinates are already in original image space)
+    scaled_boxes = [d['box'] for d in final_detections]
+    confidences = np.array([d['conf'] for d in final_detections])
+
+    has_any_polygon = any(d['polygon'] is not None for d in final_detections)
+    use_masks = has_any_polygon
+    if has_any_polygon:
+        scaled_polygons = [d['polygon'] if d['polygon'] is not None else np.array([]) for d in final_detections]
     else:
         scaled_polygons = None
-        for box in raw_boxes:
-            x1 = (box[0] - offset_x) / scale
-            y1 = (box[1] - offset_y) / scale
-            x2 = (box[2] - offset_x) / scale
-            y2 = (box[3] - offset_y) / scale
-            scaled_boxes.append([x1, y1, x2, y2])
 
     # Draw annotations on top of high-res image
     annotated = _draw_annotations(image, scaled_boxes, scaled_polygons, confidences, use_masks)

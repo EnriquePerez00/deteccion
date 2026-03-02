@@ -1,0 +1,26 @@
+{
+    "worker_id": "0",
+    "set_id": "15391",
+    "render_mode": "ref_pieza",
+    "pieces_config": [
+        {
+            "part": {
+                "ldraw_id": "15391",
+                "color_id": 0,
+                "color_name": "Black",
+                "name": "15391"
+            },
+            "tier": "REF",
+            "imgs": 300,
+            "engine": "CYCLES",
+            "res": 512,
+            "ref_num_images": 300,
+            "is_minifig": false
+        }
+    ],
+    "output_base": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/render_local/ref_pieza/15391",
+    "assets_dir": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets",
+    "ldraw_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets/ldraw",
+    "addon_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/blender_scripts",
+    "ref_num_images": 300
+}

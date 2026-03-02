@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """
-🚀 Local Render Engine v1.0 (Mac Pro M4 Optimized)
+🚀 Local Render Engine v2.0 (Mac Pro M4 Optimized)
 ==================================================
-This script orchestrates the local Blender rendering process, mirroring the strategy of 
-the cloud notebooks but optimized for Apple Silicon (METAL rendering).
+Dual-mode rendering pipeline:
+  - images_mix: Scattered pieces in 20×20cm zone, N = (X × 1500) / K formula
+  - ref_pieza: Single piece centered, 300 images with 10° rotation across 360°
+
+Optimized for Apple Silicon (METAL rendering) with CYCLES engine.
+Zone: 20×20cm at 70cm height (iPhone 16 @ 24MP reference).
 """
 
 import os
@@ -12,19 +16,17 @@ import json
 import time
 import shutil
 import zipfile
+import argparse
 import subprocess
 import concurrent.futures
 import multiprocessing
+import math
 from datetime import datetime
 from pathlib import Path
 
 # --- CONFIGURATION ---
 PROJECT_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 RENDER_LOCAL_DIR = PROJECT_ROOT / "render_local"
-IMAGES_DIR = RENDER_LOCAL_DIR / "images"
-LABELS_DIR = RENDER_LOCAL_DIR / "labels"
-LOGS_DIR = RENDER_LOCAL_DIR / "logs"
-CONFIGS_DIR = RENDER_LOCAL_DIR / "configs"
 
 # Paths
 LDRAW_PATH = PROJECT_ROOT / "assets" / "ldraw"
@@ -40,25 +42,43 @@ if not os.path.exists(BLENDER_PATH):
     except:
         pass
 
-TIER_CONFIG = {
-    'TIER_1': {'imgs': 30, 'res': 640, 'engine': 'EEVEE', 'epochs': 50},
-    'TIER_2': {'imgs': 80, 'res': 1280, 'engine': 'EEVEE', 'epochs': 150},
-    'TIER_3': {'imgs': 150, 'res': 2048, 'engine': 'CYCLES', 'epochs': 300}, # 2K para piezas complejas
-}
 
-def get_piece_tier(part_id):
-    """Dynamic tiering logic (Simplified for local setup, using common IDs)."""
-    # Minifig parts or complex IDs usually deserve TIER 3
-    if part_id.startswith('sw') or len(part_id) > 5:
-        return 'TIER_3'
-    # Medium complexity
-    if part_id in ['32054', '3795']:
-        return 'TIER_3'
-    return 'TIER_2'
+def calculate_mix_params(num_unique_pieces, mix_ratio=0.75):
+    """
+    Calculate the optimal number of images for images_mix mode.
+    
+    Formula: N = (X × 1500) / K
+    Where:
+        X = number of unique pieces (excluding minifigs)
+        K = mix count per image (50-60% of X)
+        1500 = minimum appearances per class for robust YOLO training
+    
+    Returns: (N_images, K_per_image, pieces_per_image)
+    """
+    X = num_unique_pieces
+    
+    # Variety Logic: If set is small (< 10 types), use all types in every image (K = X)
+    if X < 10:
+        K = X
+    else:
+        K = max(1, int(X * mix_ratio))  # 75% of X by default
+    
+    # N Calculation with Minimum Enforcement (N >= 500) and Temporary Max Cap (1000)
+    N = (X * 1500) // K if K > 0 else 1500
+    N = min(1000, max(N, 500))
+    
+    pieces_per_image = 30  # Fixed to 30 as requested
+    return N, K, pieces_per_image
 
-def setup_structure(piece_id=None):
+
+def setup_structure(piece_id=None, mode='images_mix'):
     """Initializes the local render workspace or piece-specific subfolders."""
-    base = RENDER_LOCAL_DIR if not piece_id else RENDER_LOCAL_DIR / piece_id
+    if mode == 'images_mix':
+        base = RENDER_LOCAL_DIR / "images_mix"
+    elif mode == 'ref_pieza':
+        base = RENDER_LOCAL_DIR / "ref_pieza" / str(piece_id) if piece_id else RENDER_LOCAL_DIR / "ref_pieza"
+    else:
+        base = RENDER_LOCAL_DIR / str(piece_id) if piece_id else RENDER_LOCAL_DIR
     
     subdirs = {
         'images': base / "images",
@@ -70,193 +90,268 @@ def setup_structure(piece_id=None):
     for d in subdirs.values():
         d.mkdir(parents=True, exist_ok=True)
     
-    return subdirs
+    return subdirs, base
 
-def run_render_worker(worker_id, piece_id, chunks_for_worker):
-    """Execution function for a single Blender process (now piece-specific)."""
+
+def run_render_worker(worker_id, piece_id, chunks_for_worker, render_mode='images_mix'):
+    """Execution function for a single Blender process."""
     if not chunks_for_worker: return
     
-    piece_dirs = setup_structure(piece_id)
+    mode_dirs, base_dir = setup_structure(piece_id, mode=render_mode)
     
     worker_cfg = {
         'worker_id': str(worker_id),
-        'set_id': piece_id, 
-        'pieces_config': chunks_for_worker, 
-        'output_base': str(RENDER_LOCAL_DIR / piece_id),
+        'set_id': piece_id,
+        'render_mode': render_mode,
+        'pieces_config': chunks_for_worker,
+        'output_base': str(base_dir),
         'assets_dir': str(PROJECT_ROOT / 'assets'),
         'ldraw_path': str(LDRAW_PATH),
         'addon_path': str(ADDON_PATH)
     }
     
-    cfg_path = piece_dirs['configs'] / f'render_cfg_{worker_id}.json'
+    # Add mode-specific config
+    if render_mode == 'ref_pieza':
+        worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 300)
+    elif render_mode == 'images_mix':
+        worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 250)
+        worker_cfg['parts_per_image'] = chunks_for_worker[0].get('parts_per_image', 20)
+    
+    cfg_path = mode_dirs['configs'] / f'render_cfg_{worker_id}.json'
     with open(cfg_path, 'w') as f:
         json.dump(worker_cfg, f, indent=4)
     
-    log_file = piece_dirs['logs'] / f'worker_{worker_id}.log'
+    log_file = mode_dirs['logs'] / f'worker_{worker_id}.log'
     
     env = os.environ.copy()
     env['PYTHONPATH'] = str(PROJECT_ROOT)
     env['UNIVERSAL_DETECTOR'] = '1'
     
-    print(f"  ↳ [{piece_id} | Worker {worker_id}] Starting render (caffeinated)...")
+    print(f"  ↳ [{piece_id} | {render_mode} | Worker {worker_id}] Starting render subprocess...")
+    
+    cmd = [
+        'caffeinate', '-i', BLENDER_PATH, '--background', '--python', str(SCENE_SETUP_PY),
+        '--', str(cfg_path)
+    ]
     
     with open(log_file, 'w') as f_out:
-        # Wrap blender in 'caffeinate' to keep the Mac awake
-        subprocess.run([
-            'caffeinate', '-i', BLENDER_PATH, '--background', '--python', str(SCENE_SETUP_PY),
-            '--', str(cfg_path)
-        ], stdout=f_out, stderr=subprocess.STDOUT, env=env)
+        f_out.write(f"--- WORKER {worker_id} START ---\n")
+        f_out.write(f"TIME: {datetime.now().isoformat()}\n")
+        f_out.write(f"CMD: {' '.join(cmd)}\n")
+        f_out.write(f"ENV: PYTHONPATH={env.get('PYTHONPATH')}\n")
+        f_out.write("-" * 40 + "\n\n")
+        f_out.flush()
+        
+        try:
+            result = subprocess.run(cmd, stdout=f_out, stderr=subprocess.STDOUT, env=env, check=False)
+            f_out.write(f"\n" + "-" * 40 + "\n")
+            f_out.write(f"COMPLETED with return code: {result.returncode}\n")
+        except Exception as e:
+            f_out.write(f"\nFATAL SUBPROCESS ERROR: {str(e)}\n")
     
     return worker_id
+
+
+def filter_minifig_parts(parts):
+    """Separate regular pieces from minifigure pieces."""
+    regular = []
+    minifigs = []
+    for p in parts:
+        if isinstance(p, dict):
+            pid = p.get('part_id', p.get('ldraw_id', ''))
+            cat = p.get('category', '')
+        else:
+            pid = str(p)
+            cat = ''
+        
+        is_minifig = (
+            pid.startswith('sw') or 
+            pid.startswith('fig') or 
+            'Minifig' in cat or
+            'minifig' in cat.lower()
+        )
+        
+        if is_minifig:
+            minifigs.append(p)
+        else:
+            regular.append(p)
+    
+    return regular, minifigs
+
 
 def main(target_parts, render_settings=None):
     start_time = time.time()
     
-    # 1. Resolve Tiers and Minifig Components
+    render_mode = 'images_mix'  # Default
+    if render_settings:
+        render_mode = render_settings.get('render_mode', 'images_mix')
+    
+    # 1. Resolve parts and split minifigs
     from src.logic.resolve_minifig import MinifigResolver
     resolver = MinifigResolver(ldraw_path=LDRAW_PATH)
     
-    full_pieces_config = []
-    minifig_groups = {} # To store chunks per minifig ID
+    regular_parts, minifig_parts = filter_minifig_parts(target_parts)
     
-    for p_id in target_parts:
-        tier_key = p_id.get('part_id', p_id.get('ldraw_id', str(p_id))) if isinstance(p_id, dict) else str(p_id)
-        tier = get_piece_tier(tier_key)
-        cfg = TIER_CONFIG[tier].copy() # copy to avoid global mutation
-        
-        # Override with manual settings if provided (e.g. from UI)
-        if render_settings:
-            if render_settings.get('num_images') is not None:
-                cfg['imgs'] = render_settings['num_images']
-            if render_settings.get('engine'):
-                cfg['engine'] = render_settings['engine']
-            if render_settings.get('resolution_x'):
-                cfg['res'] = render_settings['resolution_x']
-
-        # Support color_id: target_parts can be a list of strings (part_id only)
-        # or a list of dicts ({"part_id": ..., "color_id": ...})
-        if isinstance(p_id, dict):
-            raw_color = p_id.get('color_id', 15)
-            p_id_str = p_id.get('part_id', p_id.get('ldraw_id', str(p_id)))
-        else:
-            raw_color = 15  # Default: White
-            p_id_str = str(p_id)
-        
-        piece_entry = {
-            'ldraw_id': p_id_str, 
-            'color_id': int(raw_color), 
-            'name': p_id_str
-        }
-        
-        is_minifig = p_id_str.startswith('sw') or p_id_str.startswith('fig')
-        if is_minifig:
-            print(f"🔍 Resolving components for Minifig: {p_id_str}")
-            components = resolver.get_minifig_parts(p_id_str)
-            
-            if not components:
-                # 🛡️ Generic/Specific Fallbacks for local testing without API key
-                print(f"⚠️ API failed for {p_id_str}. Using internal fallback...")
-                if p_id_str == "sw0578": # Stormtrooper
-                    components = [
-                        {"rb_id": "973pb1672c01", "ldraw_id": "973ps9", "name": "Torso", "type": "Torso"},
-                        {"rb_id": "970pb0536", "ldraw_id": "970", "name": "Legs", "type": "Legs"},
-                        {"rb_id": "3626cpb1126", "ldraw_id": "3626c", "name": "Head", "type": "Head"},
-                        {"rb_id": "11110", "ldraw_id": "30408", "name": "Helmet", "type": "Hat"}
-                    ]
-                else: # Generic Battle Droid or Humanoid fallback
-                    components = [
-                        {"rb_id": "30375", "ldraw_id": "30375", "name": "Torso", "type": "Torso"},
-                        {"rb_id": "30376", "ldraw_id": "30376", "name": "Legs", "type": "Legs"},
-                        {"rb_id": "30377", "ldraw_id": "30377", "name": "Head", "type": "Head"}
-                    ]
-
-            if components:
-                print(f"✅ Found {len(components)} components for {p_id}.")
-                minifig_groups[p_id] = [
-                    {
-                        'part': piece_entry,
-                        'minifig_components': components,
-                        'tier': 'TIER_3', # Minifigs always TIER_3
-                        'imgs': cfg['imgs'],
-                        'engine': 'CYCLES', # Minifigs always CYCLES
-                        'res': cfg['res']
-                    }
-                ]
-            else:
-                print(f"❌ Could not resolve components for {p_id}. Skipping.")
-        else:
-            config_item = {
-                'part': piece_entry,
-                'tier': tier,
-                'imgs': cfg['imgs'],
-                'engine': cfg['engine'],
-                'res': cfg['res']
-            }
-            full_pieces_config.append(config_item)
-
-    # 2. Execution Strategy
-    # We'll run standard pieces together, and Minifigs in their own folders
-    total_imgs = sum(p['imgs'] for p in full_pieces_config) + sum(p[0]['imgs'] for p in minifig_groups.values())
+    print(f"📊 Parts breakdown: {len(regular_parts)} regular + {len(minifig_parts)} minifigs")
     
-    if total_imgs == 0:
-        print("📭 No images to render. Check if pieces/minifigs have valid components.")
-        return
-
-    print(f"📊 Total Render Plan: {total_imgs} images", flush=True)
-
-    # M4 Pro Optimization: Balanced workload to allow OS responsiveness.
-    num_cores = multiprocessing.cpu_count()
-    max_workers = max(1, num_cores - 2)
-    print(f"🚀 M4 Balanced Parallelism: Using {max_workers} concurrent workers (Cores: {num_cores})", flush=True)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = []
+    # ═══════════════════════════════════════════════════════
+    # MODE: ref_pieza — 300 images per piece, centered, 10° rotation
+    # ═══════════════════════════════════════════════════════
+    if render_mode == 'ref_pieza':
+        print("\n📸 MODE: ref_pieza — Generating reference images per piece")
+        all_parts = regular_parts + minifig_parts  # All parts get refs
         
-        # Standard pieces (Parallelized by splitting total count if fewer pieces than workers)
-        if len(full_pieces_config) == 1 and max_workers > 1:
-            item = full_pieces_config[0]
-            p_id = item['part']['ldraw_id']
-            cnt = item['imgs']
-            chunk = cnt // max_workers
-            rem = cnt % max_workers
-            for i in range(max_workers):
-                c = chunk + (1 if i < rem else 0)
-                if c == 0: continue
-                w_item = item.copy()
-                w_item['imgs'] = c
-                futures.append(executor.submit(run_render_worker, str(i), p_id, [w_item]))
-        else:
-            for item in full_pieces_config:
-                p_id = item['part']['ldraw_id']
-                futures.append(executor.submit(run_render_worker, "0", p_id, [item]))
-
-        # Minifigures (Parallelized similarly if few minifigs)
-        if len(minifig_groups) == 1 and max_workers > 1:
-            m_id = list(minifig_groups.keys())[0]
-            m_cfg = minifig_groups[m_id]
-            # m_cfg is a list of components, but usually we just want to split the 'imgs' count
-            # Simplified: just use 1 worker for now if logic is complex, or split count
-            futures.append(executor.submit(run_render_worker, "0", m_id, m_cfg))
-        else:
-            for m_id, m_cfg in minifig_groups.items():
-                futures.append(executor.submit(run_render_worker, "0", m_id, m_cfg))
-
-        # Monitor
-        while any(f.running() for f in futures):
-            # Only count images for parts in the current request to avoid global cache pollution in progress
-            curr_imgs = 0
-            for p_id_entry in target_parts:
-                p_id_str = p_id_entry.get('part_id', p_id_entry.get('ldraw_id', str(p_id_entry))) if isinstance(p_id_entry, dict) else str(p_id_entry)
-                p_img_dir = RENDER_LOCAL_DIR / p_id_str / "images"
-                if p_img_dir.exists():
-                    curr_imgs += len(list(p_img_dir.glob("*.jpg")))
+        ref_imgs_per_piece = 300
+        if render_settings and render_settings.get('ref_num_images'):
+            ref_imgs_per_piece = render_settings['ref_num_images']
+        
+        total_imgs = len(all_parts) * ref_imgs_per_piece
+        print(f"📊 Total Render Plan: {total_imgs} images ({len(all_parts)} pieces × {ref_imgs_per_piece} imgs)")
+        
+        num_cores = multiprocessing.cpu_count()
+        max_workers = max(1, num_cores - 2)
+        print(f"🚀 M4 Parallelism: {max_workers} workers")
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = []
+            for p_entry in all_parts:
+                if isinstance(p_entry, dict):
+                    p_id = p_entry.get('part_id', p_entry.get('ldraw_id', str(p_entry)))
+                    color_id = p_entry.get('color_id', 15)
+                    color_name = p_entry.get('color_name', 'White')
+                else:
+                    p_id = str(p_entry)
+                    color_id = 15
+                    color_name = 'White'
+                
+                piece_cfg = [{
+                    'part': {'ldraw_id': p_id, 'color_id': int(color_id), 'color_name': color_name, 'name': p_id},
+                    'tier': 'REF',
+                    'imgs': ref_imgs_per_piece,
+                    'engine': 'CYCLES',
+                    'res': 512,  # Optimized: DINOv2 input is 384px; 512 gives margin with 6x speedup vs 1280
+                    'ref_num_images': ref_imgs_per_piece,
+                    'is_minifig': p_entry.get('is_minifig', False),
+                }]
+                
+                futures.append(executor.submit(
+                    run_render_worker, "0", p_id, piece_cfg, render_mode='ref_pieza'
+                ))
             
-            p = (curr_imgs / total_imgs) * 100 if total_imgs > 0 else 0
-            # Cap at 100% and show correct current count
-            print(f"📈 Progress: {min(total_imgs, curr_imgs)}/{total_imgs} images ({min(100.0, p):.1f}%)", flush=True)
-            time.sleep(2)
-
-    # 4. Post-Processing: Similarity Filter + data.yaml
+            # Monitor
+            while any(f.running() for f in futures):
+                curr_imgs = 0
+                ref_base = RENDER_LOCAL_DIR / "ref_pieza"
+                if ref_base.exists():
+                    for p_dir in ref_base.iterdir():
+                        if p_dir.is_dir():
+                            img_dir = p_dir / "images"
+                            if img_dir.exists():
+                                curr_imgs += len(list(img_dir.glob("*.jpg")))
+                
+                pct = (curr_imgs / total_imgs) * 100 if total_imgs > 0 else 0
+                print(f"📈 Progress: {min(total_imgs, curr_imgs)}/{total_imgs} ({min(100.0, pct):.1f}%)", flush=True)
+                time.sleep(3)
+        
+    # ═══════════════════════════════════════════════════════
+    # MODE: images_mix — Scatter N images with K pieces each
+    # ═══════════════════════════════════════════════════════
+    elif render_mode == 'images_mix':
+        print("\n🎲 MODE: images_mix — Generating mixed scatter images")
+        
+        # Only regular parts in the mix (exclude minifigs)
+        if not regular_parts:
+            print("📭 No regular parts for images_mix. Skipping.")
+        else:
+            X = len(regular_parts)
+            mix_ratio = 0.75  # 75% default
+            if render_settings and render_settings.get('mix_ratio'):
+                mix_ratio = render_settings['mix_ratio']
+            
+            N, K, pieces_per_image = calculate_mix_params(X, mix_ratio)
+            
+            if render_settings and render_settings.get('num_images'):
+                N = render_settings['num_images']
+            if render_settings and render_settings.get('parts_per_image'):
+                pieces_per_image = render_settings['parts_per_image']
+            
+            print(f"📊 Formula: N = ({X} × 1500) / {K} = {N} images")
+            print(f"   Mix: {K}/{X} piece types ({mix_ratio*100:.0f}%), {pieces_per_image} pcs/image")
+            
+            total_imgs = N
+            
+            num_cores = multiprocessing.cpu_count()
+            max_workers = max(1, num_cores - 2)
+            print(f"🚀 M4 Parallelism: {max_workers} workers")
+            
+            # Build piece configs for each image batch
+            # Each worker gets a chunk of N/max_workers images to render
+            chunk_size = max(1, N // max_workers)
+            
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                
+                for w_idx in range(max_workers):
+                    start_img = w_idx * chunk_size
+                    end_img = min(N, (w_idx + 1) * chunk_size)
+                    if w_idx == max_workers - 1:
+                        end_img = N  # Last worker gets remainder
+                    
+                    n_imgs = end_img - start_img
+                    if n_imgs <= 0:
+                        continue
+                    
+                    # For each image, select random 75% of available piece types
+                    # The actual piece selection happens in scene_setup.py
+                    # We pass all regular parts and let Blender choose per-image
+                    pieces_config = []
+                    for p_entry in regular_parts:
+                        if isinstance(p_entry, dict):
+                            p_id = p_entry.get('part_id', p_entry.get('ldraw_id', str(p_entry)))
+                            color_id = p_entry.get('color_id', 15)
+                            color_name = p_entry.get('color_name', 'White')
+                        else:
+                            p_id = str(p_entry)
+                            color_id = 15
+                            color_name = 'White'
+                        
+                        pieces_config.append({
+                            'part': {'ldraw_id': p_id, 'color_id': int(color_id), 'color_name': color_name, 'name': p_id},
+                            'tier': 'MIX',
+                            'imgs': n_imgs,
+                            'engine': 'CYCLES',
+                            'res': 800,
+                            'parts_per_image': pieces_per_image,
+                        })
+                    
+                    futures.append(executor.submit(
+                        run_render_worker, str(w_idx), "mix", pieces_config, render_mode='images_mix'
+                    ))
+                
+                # Monitor
+                while any(f.running() for f in futures):
+                    mix_dir = RENDER_LOCAL_DIR / "images_mix" / "images"
+                    curr_imgs = len(list(mix_dir.glob("*.jpg"))) if mix_dir.exists() else 0
+                    pct = (curr_imgs / total_imgs) * 100 if total_imgs > 0 else 0
+                    print(f"📈 Progress: {min(total_imgs, curr_imgs)}/{total_imgs} ({min(100.0, pct):.1f}%)", flush=True)
+                    time.sleep(3)
+    
+    # ═══════════════════════════════════════════════════════
+    # MODE: both — Run ref_pieza first, then images_mix
+    # ═══════════════════════════════════════════════════════
+    elif render_mode == 'both':
+        print("\n🔄 MODE: both — Running ref_pieza then images_mix")
+        # Recursive calls with each mode
+        ref_settings = dict(render_settings or {})
+        ref_settings['render_mode'] = 'ref_pieza'
+        main(target_parts, render_settings=ref_settings)
+        
+        mix_settings = dict(render_settings or {})
+        mix_settings['render_mode'] = 'images_mix'
+        main(target_parts, render_settings=mix_settings)
+        return  # Skip post-processing (already done in each sub-call)
+    
+    # 4. Post-Processing
     end_time = time.time()
     duration = end_time - start_time
     
@@ -273,8 +368,18 @@ def main(target_parts, render_settings=None):
         extractor = FeatureExtractor()
         THRESHOLD = 0.98
         
-        for piece_dir in RENDER_LOCAL_DIR.iterdir():
-            if not piece_dir.is_dir() or piece_dir.name.startswith('.'): continue
+        # Determine directories to filter based on mode
+        filter_dirs = []
+        if render_mode == 'ref_pieza':
+            ref_base = RENDER_LOCAL_DIR / "ref_pieza"
+            if ref_base.exists():
+                filter_dirs = [d for d in ref_base.iterdir() if d.is_dir() and not d.name.startswith('.')]
+        elif render_mode == 'images_mix':
+            mix_dir = RENDER_LOCAL_DIR / "images_mix"
+            if mix_dir.exists():
+                filter_dirs = [mix_dir]
+        
+        for piece_dir in filter_dirs:
             images_dir = piece_dir / "images"
             labels_dir = piece_dir / "labels"
             if not images_dir.exists(): continue
@@ -315,45 +420,107 @@ def main(target_parts, render_settings=None):
     
     print(f"✅ Filter complete. Removed {total_deleted} duplicates total.")
     
-    # 4b. Generate data.yaml for each piece/minifig subfolder
+    # 4b. Generate data.yaml and manifest
     print("📝 Generating data.yaml files...")
     piece_manifest = []
     
-    for piece_dir in RENDER_LOCAL_DIR.iterdir():
-        if not piece_dir.is_dir() or piece_dir.name.startswith('.'): continue
+    # Process ref_pieza directories
+    ref_base = RENDER_LOCAL_DIR / "ref_pieza"
+    if ref_base.exists():
+        for piece_dir in sorted(ref_base.iterdir()):
+            if not piece_dir.is_dir() or piece_dir.name.startswith('.'): continue
+            images_dir = piece_dir / "images"
+            labels_dir = piece_dir / "labels"
+            if not images_dir.exists(): continue
+            
+            img_count = len(list(images_dir.glob("*.jpg")))
+            lbl_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
+            if img_count == 0: continue
+            
+            data_yaml_path = piece_dir / "data.yaml"
+            with open(data_yaml_path, 'w') as f:
+                f.write(f"path: .\n")
+                f.write(f"train: images\n")
+                f.write(f"val: images\n")
+                f.write(f"nc: 1\n")
+                f.write(f"names: ['lego']\n")
+            
+            piece_manifest.append({
+                "piece_id": piece_dir.name,
+                "mode": "ref_pieza",
+                "images": img_count,
+                "labels": lbl_count,
+                "data_yaml": f"ref_pieza/{piece_dir.name}/data.yaml",
+            })
+            print(f"  ✅ ref_pieza/{piece_dir.name}: {img_count} imgs → data.yaml")
+    
+    # Process images_mix directory
+    mix_dir = RENDER_LOCAL_DIR / "images_mix"
+    if mix_dir.exists():
+        images_dir = mix_dir / "images"
+        labels_dir = mix_dir / "labels"
+        if images_dir.exists():
+            img_count = len(list(images_dir.glob("*.jpg")))
+            lbl_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
+            
+            if img_count > 0:
+                data_yaml_path = mix_dir / "data.yaml"
+                with open(data_yaml_path, 'w') as f:
+                    f.write(f"path: .\n")
+                    f.write(f"train: images\n")
+                    f.write(f"val: images\n")
+                    f.write(f"nc: 1\n")
+                    f.write(f"names: ['lego']\n")
+                
+                piece_manifest.append({
+                    "piece_id": "images_mix",
+                    "mode": "images_mix",
+                    "images": img_count,
+                    "labels": lbl_count,
+                    "data_yaml": "images_mix/data.yaml",
+                })
+                print(f"  ✅ images_mix: {img_count} imgs → data.yaml")
+    
+    # Also process legacy per-piece directories (backward compatibility)
+    for piece_dir in sorted(RENDER_LOCAL_DIR.iterdir()):
+        if not piece_dir.is_dir(): continue
+        if piece_dir.name in ('images_mix', 'ref_pieza', '.DS_Store'): continue
+        if piece_dir.name.startswith('.'): continue
+        
         images_dir = piece_dir / "images"
         labels_dir = piece_dir / "labels"
         if not images_dir.exists(): continue
         
         img_count = len(list(images_dir.glob("*.jpg")))
         lbl_count = len(list(labels_dir.glob("*.txt"))) if labels_dir.exists() else 0
-        
         if img_count == 0: continue
         
-        # Write data.yaml (YOLO format, Universal Detector = 1 class)
         data_yaml_path = piece_dir / "data.yaml"
-        with open(data_yaml_path, 'w') as f:
-            f.write(f"path: .\n")
-            f.write(f"train: images\n")
-            f.write(f"val: images\n")
-            f.write(f"nc: 1\n")
-            f.write(f"names: ['lego']\n")
+        if not data_yaml_path.exists():
+            with open(data_yaml_path, 'w') as f:
+                f.write(f"path: .\n")
+                f.write(f"train: images\n")
+                f.write(f"val: images\n")
+                f.write(f"nc: 1\n")
+                f.write(f"names: ['lego']\n")
         
         piece_manifest.append({
             "piece_id": piece_dir.name,
+            "mode": "legacy",
             "images": img_count,
             "labels": lbl_count,
-            "data_yaml": str(data_yaml_path.relative_to(RENDER_LOCAL_DIR)),
+            "data_yaml": f"{piece_dir.name}/data.yaml",
         })
-        print(f"  ✅ {piece_dir.name}: {img_count} imgs, {lbl_count} labels → data.yaml")
     
     # 4c. Global manifest
     manifest_path = RENDER_LOCAL_DIR / "dataset_manifest.json"
+    total_images = sum(p['images'] for p in piece_manifest)
     manifest = {
         "generated_at": datetime.now().isoformat(),
         "duration_minutes": round(duration / 60, 1),
+        "render_mode": render_mode,
         "total_pieces": len(piece_manifest),
-        "total_images": sum(p['images'] for p in piece_manifest),
+        "total_images": total_images,
         "duplicates_removed": total_deleted,
         "pieces": piece_manifest,
     }
@@ -361,67 +528,77 @@ def main(target_parts, render_settings=None):
         json.dump(manifest, f, indent=2)
     print(f"📋 Manifest: {manifest_path}")
     
-    # 5. ZIP for Lightning AI (includes dataset + source code needed for training)
-    ts = datetime.now().strftime("%Y%m%d_%H%M")
-    zip_name = f"lightning_dataset_{ts}.zip"
-    zip_path = PROJECT_ROOT / zip_name
-    
-    print(f"📦 Creating Lightning AI package: {zip_name}...")
-    
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        # A. Dataset (render_local/ contents)
-        for file in RENDER_LOCAL_DIR.rglob("*"):
-            if file.is_file() and not file.name.startswith('.'):
-                arcname = Path("render_local") / file.relative_to(RENDER_LOCAL_DIR)
-                zipf.write(file, arcname=arcname)
+    # 5. ZIP for Lightning AI / Kaggle
+    if not render_settings.get('skip_zip', False):
+        ts = datetime.now().strftime("%Y%m%d_%H%M")
+        zip_name = f"lightning_dataset_{ts}.zip"
+        zip_path = PROJECT_ROOT / zip_name
         
-        # B. Source code needed for training
-        src_dir = PROJECT_ROOT / "src"
-        for py_file in src_dir.rglob("*.py"):
-            if '__pycache__' in str(py_file): continue
-            arcname = Path("src") / py_file.relative_to(src_dir)
-            zipf.write(py_file, arcname=arcname)
+        print(f"📦 Creating training package: {zip_name}...")
         
-        # C. Config
-        config_path = PROJECT_ROOT / "config_train.json"
-        if config_path.exists():
-            zipf.write(config_path, arcname="config_train.json")
-        
-        # D. Credentials for Drive sync (if available)
-        for cred_file in ["credentials.json", "token_1973.pickle"]:
-            cred_path = PROJECT_ROOT / cred_file
-            if cred_path.exists():
-                zipf.write(cred_path, arcname=cred_file)
-        
-        # E. Existing models (for incremental training)
-        models_dir = PROJECT_ROOT / "models"
-        if models_dir.exists():
-            for model_file in models_dir.rglob("*"):
-                if model_file.is_file() and not model_file.name.startswith('.'):
-                    arcname = Path("models") / model_file.relative_to(models_dir)
-                    zipf.write(model_file, arcname=arcname)
-                    
-        # F. Notebooks (NEW: include generated Lightning AI notebooks)
-        notebooks_dir = PROJECT_ROOT / "notebooks"
-        if notebooks_dir.exists():
-            # Search for LightningAI notebooks
-            for nb_file in notebooks_dir.rglob("*.ipynb"):
-                if 'LightningAI_' in nb_file.name:
-                    # We only include the most recent one to keep ZIP small, or all? 
-                    # Usually, including the subfolder structure is safer
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # A. Dataset (render_local/ contents)
+            for file in RENDER_LOCAL_DIR.rglob("*"):
+                if file.is_file() and not file.name.startswith('.'):
+                    arcname = Path("render_local") / file.relative_to(RENDER_LOCAL_DIR)
+                    zipf.write(file, arcname=arcname)
+            
+            # B. Source code needed for training
+            src_dir = PROJECT_ROOT / "src"
+            for py_file in src_dir.rglob("*.py"):
+                if '__pycache__' in str(py_file): continue
+                arcname = Path("src") / py_file.relative_to(src_dir)
+                zipf.write(py_file, arcname=arcname)
+            
+            # C. Config
+            config_path = PROJECT_ROOT / "config_train.json"
+            if config_path.exists():
+                zipf.write(config_path, arcname="config_train.json")
+            
+            # D. Credentials for Drive sync (if available)
+            for cred_file in ["credentials.json", "token_1973.pickle"]:
+                cred_path = PROJECT_ROOT / cred_file
+                if cred_path.exists():
+                    zipf.write(cred_path, arcname=cred_file)
+            
+            # E. Existing models (Incremental training weights ONLY)
+            models_dir = PROJECT_ROOT / "models"
+            if models_dir.exists():
+                # 1. Skip vector indices (only needed for inference/indexing locally)
+                # 2. Only include the LATEST .pt from yolo_model
+                yolo_dir = models_dir / "yolo_model"
+                if yolo_dir.exists():
+                    pt_files = list(yolo_dir.glob("*.pt"))
+                    if pt_files:
+                        latest_pt = max(pt_files, key=os.path.getmtime)
+                        arcname = Path("models") / "yolo_model" / latest_pt.name
+                        zipf.write(latest_pt, arcname=arcname)
+                        print(f"  🧠 Including latest weights: {latest_pt.name}")
+                        
+            # F. Notebooks (include generated notebooks)
+            notebooks_dir = PROJECT_ROOT / "notebooks"
+            if notebooks_dir.exists():
+                for nb_file in notebooks_dir.rglob("*.ipynb"):
                     arcname = Path("notebooks") / nb_file.relative_to(notebooks_dir)
                     zipf.write(nb_file, arcname=arcname)
                     print(f"  📎 Including notebook: {nb_file.name}")
-    
-    zip_size_mb = zip_path.stat().st_size / (1024 * 1024)
-    print(f"🌟 Lightning package ready: {zip_name} ({zip_size_mb:.1f} MB)")
-    print(f"📊 Contents: {manifest['total_images']} images across {manifest['total_pieces']} pieces")
+        
+        zip_size_mb = zip_path.stat().st_size / (1024 * 1024)
+        print(f"🌟 Training package ready: {zip_name} ({zip_size_mb:.1f} MB)")
+    else:
+        print("⏭️ Skipping ZIP generation as requested.")
+    print(f"📊 Contents: {total_images} images across {len(piece_manifest)} pieces")
     print(f"⏱️ Total pipeline time: {duration/60:.1f} min")
 
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--no-zip", action="store_true", help="Skip ZIP generation")
+    args = parser.parse_args()
+
     # Get pieces from config_train.json if exists, else defaults
     parts = []
-    render_settings = {}
+    render_settings = {'skip_zip': args.no_zip}
     config_path = PROJECT_ROOT / "config_train.json"
     if config_path.exists():
         with open(config_path, 'r') as f:
@@ -430,6 +607,6 @@ if __name__ == "__main__":
             render_settings = data.get('render_settings', {})
             
     if not parts:
-        parts = ["3022", "32054", "3795", "4073", "sw0578"]
+        parts = ["3022", "32054", "3795", "4073"]
         
     main(parts, render_settings=render_settings)

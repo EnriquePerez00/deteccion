@@ -141,3 +141,11 @@ class VectorIndex:
                 except Exception as e:
                     print(f"Failed to load old legacy index: {e}")
             return False
+
+    def get_indexed_ids(self):
+        """Returns a set of all unique ldraw_ids currently in the index."""
+        indexed_ids = set()
+        for m in self.metadata:
+            if isinstance(m, dict) and 'ldraw_id' in m:
+                indexed_ids.add(m['ldraw_id'])
+        return indexed_ids
