@@ -108,11 +108,10 @@ def render_launcher_ui(project_root):
                 N = min(1000, max(500, (X * 1500) // K))
                 
                 st.markdown(f"""
-                **📐 Fórmula images_mix:**
-                - `X` = **{X}** piezas regulares
-                - `K` = **{K}** piezas/tipo por imagen ({mix_ratio*100:.0f}% de X)
-                - `N` = min(1000, max(500, ({X} × 1500) / {K})) = **{N}** imágenes
-                - **30** piezas físicas por imagen
+                **🎯 Objetivo de Entrenamiento:**
+                - Imágenes Combinadas (**YOLO26**): **{N}** imgs
+                - Variedad por imagen: **{K}** tipos de pieza
+                - Densidad: **30** piezas físicas/imagen
                 """)
             else:
                 mix_ratio = 0.75
@@ -122,18 +121,33 @@ def render_launcher_ui(project_root):
         with col_summary:
             ref_count = len(detail_parts) * 300
             st.markdown(f"""
-            **📊 Resumen del plan:**
+            **📊 Resumen de Imágenes:**
             """)
             if render_mode_key in ('ref_pieza', 'both'):
-                st.markdown(f"- 📸 **ref_pieza**: {len(detail_parts)} piezas × 300 = **{ref_count}** imgs")
+                st.markdown(f"- 🔍 **Referencia (Vectores)**: **{ref_count}** imgs")
             if render_mode_key in ('images_mix', 'both') and X > 0:
-                st.markdown(f"- 🎲 **images_mix**: **{N}** imgs (excl. {len(minifigs)} minifigs)")
+                st.markdown(f"- 🎭 **Mezcla (YOLO)**: **{N}** imgs")
+            
             total_plan = 0
             if render_mode_key in ('ref_pieza', 'both'):
                 total_plan += ref_count
             if render_mode_key in ('images_mix', 'both'):
                 total_plan += N
-            st.markdown(f"- **Total**: ~**{total_plan}** imágenes sintéticas")
+            st.markdown(f"--- \n**Total**: ~**{total_plan}** imágenes")
+
+            # Resolution Selector for Mix
+            if render_mode_key in ('images_mix', 'both'):
+                st.markdown("---")
+                mix_res_choice = st.radio(
+                    "🎯 Resolución images_mix (YOLO):",
+                    ["1920x1440 (Alta Calidad)", "640x480 (Rápido)", "640x640 (Cuadrada - Entrenamiento)"],
+                    index=0,
+                    horizontal=True,
+                    key="mix_res_choice_ui"
+                )
+                st.session_state['mix_res_val'] = 1920 if "1920" in mix_res_choice else 640
+                # If 640x640 is selected, we want a square aspect ratio
+                st.session_state['mix_res_square'] = "640x640" in mix_res_choice
         
         # Detailed table
         table_data = []
@@ -213,19 +227,36 @@ def render_launcher_ui(project_root):
             else:
                 p_id_str = str(p_id)
 
+        if force_render:
+            import shutil
+            # 1. Clear mix cache if applicable
+            if render_mode_key in ("images_mix", "both"):
+                mix_dir = os.path.join(render_base, "images_mix")
+                if os.path.exists(mix_dir):
+                    try:
+                        shutil.rmtree(mix_dir)
+                        st.write(f"🗑️ Caché borrada: `images_mix`")
+                    except: pass
+
+        for p_id in all_requested_ids:
+            if isinstance(p_id, dict):
+                p_id_str = p_id.get("part_id", str(p_id))
+            else:
+                p_id_str = str(p_id)
+
             if force_render:
-                # Clear cache for this piece
-                import shutil
-                for check_dir in [
-                    os.path.join(render_base, "ref_pieza", p_id_str),
-                    os.path.join(render_base, p_id_str),
-                    os.path.join(render_base, "images_mix"), # Clear mix too if forcing
-                ]:
-                    if os.path.exists(check_dir):
-                        try:
-                            shutil.rmtree(check_dir)
-                            st.write(f"🗑️ Caché borrada: `{os.path.basename(check_dir)}`")
-                        except: pass
+                # 2. Clear per-piece cache if applicable
+                if render_mode_key in ("ref_pieza", "both"):
+                    import shutil
+                    for check_dir in [
+                        os.path.join(render_base, "ref_pieza", p_id_str),
+                        os.path.join(render_base, p_id_str), # legacy
+                    ]:
+                        if os.path.exists(check_dir):
+                            try:
+                                shutil.rmtree(check_dir)
+                                st.write(f"🗑️ Caché borrada: `ref_pieza/{p_id_str}`")
+                            except: pass
                 
                 if isinstance(p_id, dict):
                     pending_ids.append(p_id)
@@ -262,7 +293,9 @@ def render_launcher_ui(project_root):
             render_settings = {
                 "engine": "CYCLES",
                 "render_mode": render_mode_key,
-                "mix_ratio": mix_ratio if render_mode_key in ('images_mix', 'both') else 0.75
+                "mix_ratio": mix_ratio if render_mode_key in ('images_mix', 'both') else 0.75,
+                "res": st.session_state.get('mix_res_val', 1920),
+                "square": st.session_state.get('mix_res_square', False)
             }
             
             with open(config_path, "w") as f:
@@ -276,13 +309,16 @@ def render_launcher_ui(project_root):
             st.markdown(f"### ⚙️ Pipeline End-to-End ({render_mode_key})")
             
             # Progress Metrics
-            m1, m2, m3 = st.columns(3)
+            m1, m2, m3, m4 = st.columns(4)
             total_images_ui = m1.metric("Total Imágenes", "Calculando...")
             progress_pct_ui = m2.metric("Progreso Global", "0%")
-            status_ui = m3.metric("Fase Actual", "Iniciando...")
+            eta_ui = m3.metric("Tiempo Restante", "--:--")
+            status_ui = m4.metric("Fase Actual", "Iniciando...")
             
             progress_bar = st.progress(0)
             status_text = st.empty()
+            
+            start_time_render = None
             
             # --- PHASE 1: RENDERING (0% to 80%) ---
             status_ui.metric("Fase Actual", "1/2: Renderizado 3D")
@@ -292,7 +328,9 @@ def render_launcher_ui(project_root):
             if not gen_zip:
                 cmd_render.append("--no-zip")
             
-            process_render = subprocess.Popen(cmd_render, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+            # Force unbuffered Python output
+            env = dict(os.environ, PYTHONUNBUFFERED='1')
+            process_render = subprocess.Popen(cmd_render, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
             
             total_found = 0
             for line in process_render.stdout:
@@ -309,13 +347,38 @@ def render_launcher_ui(project_root):
                     
                 if "Progress:" in line:
                     try:
+                        import time as _time
+                        if not start_time_render:
+                            start_time_render = _time.time()
+                            
                         parts_progress = line.split("Progress:")[1].strip().split(" ")[0]
                         done, total = map(int, parts_progress.split("/"))
+                        
                         # Rendering is 80% of the total pipeline
                         pct = (done / total) * 0.80
                         progress_bar.progress(min(1.0, pct))
                         progress_pct_ui.metric("Progreso Global", f"{int(pct*100)}%")
                         status_text.text(f"🚀 Renderizando imagen {done} de {total}...")
+                        
+                        # ETA Logic
+                        if done > 2: # Wait for some samples for stability
+                            elapsed = _time.time() - start_time_render
+                            per_img = elapsed / done
+                            rem_imgs = total - done
+                            eta_secs = int(rem_imgs * per_img)
+                            
+                            if eta_secs > 3600:
+                                h = eta_secs // 3600
+                                m = (eta_secs % 3600) // 60
+                                eta_str = f"{h}h {m}m"
+                            elif eta_secs > 60:
+                                m = eta_secs // 60
+                                s = eta_secs % 60
+                                eta_str = f"{m}m {s}s"
+                            else:
+                                eta_str = f"{eta_secs}s"
+                            eta_ui.metric("Tiempo Restante", eta_str)
+                            
                     except: pass
                 else:
                     l_strip = line.strip()
@@ -333,7 +396,8 @@ def render_launcher_ui(project_root):
                 
                 index_script = os.path.join(project_root, "run_incremental_indexing.py")
                 cmd_index = [sys.executable, index_script]
-                process_index = subprocess.Popen(cmd_index, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                env = dict(os.environ, PYTHONUNBUFFERED='1')
+                process_index = subprocess.Popen(cmd_index, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
                 
                 for line in process_index.stdout:
                     l_strip = line.strip()

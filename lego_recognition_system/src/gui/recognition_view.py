@@ -221,7 +221,7 @@ def _draw_annotations(image, boxes, polygons, confidences, use_masks):
     return result
 
 
-def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
+def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_threshold):
     """Renders the full recognition pipeline visualization."""
 
     try:
@@ -361,7 +361,7 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
 
                     with col_ref:
                         st.markdown("**🎨 Referencia 3D (Top #1)**")
-                        if top_sim > 0.3:
+                        if top_sim >= similarity_threshold:
                             stock_img = fetch_lego_image(top_id)
                             if stock_img:
                                 st.image(stock_img, use_container_width=True)
@@ -370,8 +370,8 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
                                 st.warning(f"ID: **{top_id}**")
                                 st.info("Imagen 3D no encontrada en Rebrickable")
                         else:
-                            st.error("⚠️ Sin match confiable")
-                            st.caption("La similitud es demasiado baja (< 30%)")
+                            st.error("⚠️ Pieza Dudosa / Desconocida")
+                            st.caption(f"La similitud ({top_sim:.1%}) es menor al umbral ({similarity_threshold:.1%})")
 
                     with col_details:
                         st.markdown("**🏆 Top 3 Candidatos**")
@@ -394,8 +394,8 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold):
                             )
                             st.progress(max(0.0, min(1.0, float(sim))))
 
-                        # Count top match for summary (threshold > 0.3)
-                        if top_sim > 0.3:
+                        # Count top match for summary (threshold check)
+                        if top_sim >= similarity_threshold:
                             identified_parts[top_id] = identified_parts.get(top_id, 0) + 1
                 else:
                     with col_details:

@@ -43,21 +43,31 @@ def main():
         # Cargar modelos proactivamente
         # Cargar modelos y actualizar estado (incluso si hay cache hit)
         from src.gui.recognition_view import load_models
-        _, _, _, status = load_models(models_dir)
+        _, _, _, status, _ = load_models(models_dir)
         st.session_state["model_status"] = status
         
         # Mostrar el estado en la barra lateral
         render_sidebar_model_status()
 
         st.sidebar.markdown("---")
-        st.sidebar.subheader("⚙️ Configuración")
         conf_threshold = st.sidebar.slider(
             "Umbral de confianza YOLO",
             min_value=0.05,
             max_value=1.0,
-            value=0.15,       # ← lowered from 0.4
+            value=0.15,
             step=0.05,
             help="Valores bajos (0.10–0.20) son recomendados para el modelo universal."
+        )
+
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("🎯 Fase 2 — Vectores")
+        similarity_threshold = st.sidebar.slider(
+            "Umbral de Similitud (Fase 2)",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.45,
+            step=0.05,
+            help="Si la similitud vectorial es menor a esto, la pieza se marcará como desconocida o dudosa."
         )
 
         st.title("🔍 Reconocimiento Interactivo de Piezas")
@@ -69,13 +79,13 @@ def main():
         )
 
         if uploaded_file is not None:
-            render_recognition_ui(uploaded_file, models_dir, conf_threshold)
+            render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_threshold)
         else:
             test_img_path = os.path.join(PROJECT_ROOT, "temp_query.jpg")
             if os.path.exists(test_img_path):
                 st.info("No hay imagen subida. Usando muestra 'temp_query.jpg'.")
                 with open(test_img_path, "rb") as f:
-                    render_recognition_ui(f, models_dir, conf_threshold)
+                    render_recognition_ui(f, models_dir, conf_threshold, similarity_threshold)
             else:
                 st.markdown(
                     """

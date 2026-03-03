@@ -99,7 +99,7 @@ def setup_render_engine(engine='CYCLES', resolution=(2048, 2048)):
         scene.cycles.device = 'CPU'
     
     # Eco-Mode: fast rendering, try AI denoising if supported by this Blender version
-    scene.cycles.samples = 64  
+    scene.cycles.samples = 32  
     scene.cycles.use_adaptive_sampling = True
     # 0.01 threshold (high precision "real resolution" for maximum detail)
     scene.cycles.adaptive_threshold = 0.05
@@ -152,14 +152,31 @@ def setup_render_engine(engine='CYCLES', resolution=(2048, 2048)):
     # 🎨 Color Management: AgX for highlight preservation (prevents color wash-out)
     if hasattr(scene.view_settings, "view_transform"):
         # AgX is superior in Blender 4.0+, Filmic fallback for older
-        scene.view_settings.view_transform = 'AgX' if bpy.app.version >= (4, 0, 0) else 'Filmic'
-        scene.view_settings.exposure = -0.7  # Prevent clipping in highlights
-        scene.view_settings.look = 'High Contrast'
+        vtrans = 'AgX' if bpy.app.version >= (4, 0, 0) else 'Filmic'
+        try:
+            scene.view_settings.view_transform = vtrans
+            scene.view_settings.exposure = -0.7  # Prevent clipping in highlights
+            
+            # Set Look based on transform - AgX uses prefixes in 4.x/5.x
+            try:
+                if vtrans == 'AgX':
+                    scene.view_settings.look = 'AgX - High Contrast'
+                else:
+                    scene.view_settings.look = 'High Contrast'
+            except:
+                pass # Look not supported or named differently
+        except Exception as e:
+            print(f"  ⚠️ Warning: Color Management error: {e}")
     
     # Shadows & AO: Fast GI Approximation in Cycles
     if hasattr(scene.cycles, "use_fast_gi"):
         scene.cycles.use_fast_gi = True
-        scene.cycles.fast_gi_method = 'AO'
+        try:
+            scene.cycles.fast_gi_method = 'AO'
+        except:
+            # Blender 4.x/5.x fallback. Method 'AO' was renamed or is implicitly 'REPLACE' with AO settings.
+            # Usually, the options are ('REPLACE', 'ADD') now.
+            scene.cycles.fast_gi_method = 'REPLACE'
     
     print(f"  ⚡ Render Config: 64 samples + {scene.view_settings.view_transform} + High Contrast active.")
 
@@ -493,7 +510,7 @@ def setup_compositor():
     # Replicates the slight lack of "infinite sharpness" in smartphone optics
     blur = safe_node_new('CompositorNodeBlur', 'Sensor Softness')
     if blur:
-        blur.filter_type = 'GAUSSIAN'
+        safe_set(blur, 'filter_type', 'GAUSSIAN')
         safe_set_input(blur, 'Size X', 1.0)
         safe_set_input(blur, 'Size Y', 1.0)
 
@@ -963,6 +980,8 @@ def main():
     
     # In Universal Detection Plan B, we receive 'pieces_config'
     # Fallback to 'parts' for backward compatibility
+    render_mode = data.get('render_mode', 'images_mix')
+    PARTS_PER_IMAGE = data.get('parts_per_image', 20)
     pieces_config = data.get('pieces_config', [])
     if not pieces_config:
         parts = data.get('parts', [])
@@ -1044,13 +1063,23 @@ def main():
     
     # Extract new Tiering parameters
     # Fallback for old templates
-    # Calibration: iPhone 16 (24MP 4:3)
-    # 5656 x 4242 px
+    # Calibration: iPhone 16 Optics (4:3) - Scaled for YOLO Training
+    # Standard 1920x1440 px (8-9x faster than 24MP, maintains exact aspect ratio/FOVs)
     global_render_engine = data.get('render_engine', 'CYCLES')
-    res_x = data.get('resolution_x', 5656)
-    res_y = data.get('resolution_y', 4242)
+    res_x = data.get('resolution_x', 1920)
+    res_y = data.get('resolution_y', int(res_x * 0.75)) # Force 4:3
     
     setup_render_engine(engine=global_render_engine, resolution=(res_x, res_y))
+    
+    # Secondary Resolution Override: Check if a specific piece config has a different resolution
+    if pieces_config and 'res' in pieces_config[0]:
+        px = pieces_config[0]['res']
+        py = int(px * 0.75)
+        # Apply specifically if it's ref_pieza (smaller) to avoid large defaults
+        if render_mode == 'ref_pieza':
+             print(f"  🎯 Mode-specific resolution override: {px}x{py}")
+             setup_render_engine(engine=global_render_engine, resolution=(px, py))
+
     setup_compositor()  # Sensor noise + bloom glare post-processing
     cam = setup_camera()
     setup_lighting()
@@ -1118,9 +1147,7 @@ def main():
     # --- CONFIGURATION FOR 20x20cm ZONE (iPhone 16 @ 24MP) ---
     # Lens = (36 × 0.70) / 0.20 = 126mm → covers exactly 20x20cm at 70cm
     
-    # Read render mode from config: 'images_mix' or 'ref_pieza'
-    render_mode = data.get('render_mode', 'images_mix')
-    PARTS_PER_IMAGE = data.get('parts_per_image', 20)  # For images_mix mode
+    # Configuration for pieces is already extracted at the top of main()
     
     # 1. Setup Camera (Fixed Zenithal Centered - iPhone 16 Calibration)
     # Calibrated to 26mm @ 0.70m height
@@ -1159,19 +1186,22 @@ def main():
     # --- GLOBAL RENDER SETUP ---
     # Setup once for the whole run to avoid driver overhead in loops
     first_pc = pieces_config[0] if pieces_config else {'engine': 'CYCLES', 'res': 800}
-    setup_render_engine(engine=first_pc.get('engine', 'CYCLES'), resolution=(first_pc.get('res', 800), first_pc.get('res', 800)))
+    res_x = first_pc.get('res', 800)
+    is_square = data.get('square', False)
+    res_y = res_x if (is_square or render_mode != 'images_mix') else int(res_x * 0.75)
+    setup_render_engine(engine=first_pc.get('engine', 'CYCLES'), resolution=(res_x, res_y))
     
     for i, pc in enumerate(pieces_config):
         part = pc['part']
         ldraw_id = part['ldraw_id']
         color_id = part.get('color_id', None)
         color_name = part.get('color_name', None)
-        num_images = pc['imgs']
-        engine = pc['engine']
-        res = pc['res']
+        num_images = pc.get('imgs', 30)
+        engine = pc.get('engine', 'CYCLES')
+        res = pc.get('res', 800)
         
         color_info = f" | Color: {color_id} ({color_name or 'n/a'})" if color_id is not None else ""
-        print(f"\n🚀 Loading part {ldraw_id}{color_info} | Tier: {pc['tier']}")
+        print(f"\n🚀 Loading part {ldraw_id}{color_info} | Tier: {pc.get('tier', 'REF')}")
         
         # Strategy C: Universal Detector mode forces all class IDs to 0
         if os.environ.get("UNIVERSAL_DETECTOR", "0") == "1":
@@ -1222,224 +1252,311 @@ def main():
         return max_r
 
     # ═══════════════════════════════════════════════════════════
-    # MODE: ref_pieza — Single piece centered, 360° rotation
+    # STABLE FACE ANALYSIS (New Geometry-Based Approach)
+    # ═══════════════════════════════════════════════════════════
+    def get_stable_orientations(obj):
+        """
+        Analyzes the piece geometry using its Convex Hull to find
+        all stable resting positions on a flat surface.
+        """
+        import bmesh
+        from mathutils import Matrix
+        
+        # 1. Create a copy and apply all transforms
+        bpy.context.view_layer.update()
+        me = obj.to_mesh()
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        
+        # 2. Compute Convex Hull
+        # This gives us all potential 'flat' support surfaces
+        bmesh.ops.convex_hull(bm, input=bm.verts)
+        
+        # 3. Analyze each face of the hull
+        stable_faces = []
+        com = Vector((0, 0, 0))
+        for v in bm.verts: com += v.co
+        com /= len(bm.verts) # Simple center of mass approximation
+        
+        for face in bm.faces:
+            if face.area < 1e-6: continue
+            
+            # Normal of the face in local space
+            normal = face.normal.copy()
+            center = face.calc_center_median()
+            
+            # Rotation to make this face normal point DOWN (-Z) 
+            # so the object 'rests' on the face.
+            # Blender uses +Z as UP, so if face normal is N, 
+            # we want to rotate the object so N is (0,0,-1)
+            target_down = Vector((0, 0, -1))
+            rot_matrix = normal.rotation_difference(target_down).to_matrix().to_4x4()
+            
+            # Project CoM onto the face plane in the 'rest' orientation
+            # If the projected CoM is within the face's boundaries, it's stable.
+            # Local projection check:
+            rel_com = com - center
+            # Component along normal should be 'negative' or zero if CoM is 'above' the face
+            # But the most important check for static equilibrium is if CoM is over the footprint
+            dist_to_plane = rel_com.dot(normal)
+            projected_com = com - (dist_to_plane * normal)
+            
+            # Check if projected_com is inside the face polygon
+            is_inside = True
+            for edge in face.edges:
+                # Vector from edge start to projected CoM
+                v1 = edge.verts[0].co
+                v2 = edge.verts[1].co
+                edge_vec = v2 - v1
+                to_com = projected_com - v1
+                # Cross product with normal should point same way for all edges (convex face)
+                side = (edge_vec.cross(to_com)).dot(normal)
+                if side < -1e-6:
+                    is_inside = False
+                    break
+            
+            if is_inside:
+                # We found a potential stable orientation!
+                # We need the rotation that brings this face to Z=0 and points UP.
+                # Actually, easier to think: Face normal points (0,0,-1).
+                # The Euler we store is what to apply to the object to reach this state.
+                euler_rot = normal.rotation_difference(target_down).to_euler()
+                stable_faces.append(euler_rot)
+
+        # 4. Deduplicate similar orientations (symmetries)
+        distinct_faces = []
+        for rot in stable_faces:
+            is_new = True
+            for existing in distinct_faces:
+                # Check angular difference
+                diff = sum(abs(a - b) for a, b in zip(rot, existing))
+                if diff < 0.1: # Threshold for similarity
+                    is_new = False
+                    break
+            if is_new:
+                distinct_faces.append(rot)
+        
+        bm.free()
+        obj.to_mesh_clear()
+        return distinct_faces
+
+    # ═══════════════════════════════════════════════════════════
+    # MODE: ref_pieza — Multi-Worker Geometric Strategy
     # ═══════════════════════════════════════════════════════════
     if render_mode == 'ref_pieza':
-        print("📸 MODE: ref_pieza — Single piece reference renders")
         if not unique_meshes:
             print("❌ No meshes loaded for ref_pieza mode.")
+            return
+
+        template = unique_meshes[0]
+        template_obj = template['obj']
+        ldraw_id_ref = template['ldraw_id']
+        
+        # --- ANALYSIS PHASE ---
+        if data.get('is_analyze_only'):
+            print(f"🔍 Analyzing stable faces for {ldraw_id_ref}...")
+            orientations = get_stable_orientations(template_obj)
+            
+            analysis_result = {
+                'ldraw_id': ldraw_id_ref,
+                'stable_faces_count': len(orientations),
+                'orientations': [[r.x, r.y, r.z] for r in orientations]
+            }
+            
+            # Write results back for the orchestrator
+            # Use the same data-path but .result extension
+            result_path = data_file.replace('.json', '.result')
+            with open(result_path, 'w') as rf:
+                json.dump(analysis_result, rf, indent=4)
+            print(f"✅ Analysis complete: {len(orientations)} stable faces found.")
+            return
+
+        # --- RENDER PHASE ---
+        print("📸 MODE: ref_pieza — Geometric Stable Face Renders")
+        
+        # Place piece at center
+        template_obj.location = (0, 0, 0)
+        set_origin_to_center(template_obj)
+        
+        # Load the specific stable face for this worker
+        # Or if not provided, fallback to standard random physics
+        target_face_idx = data.get('stable_face_idx', -1)
+        orientations = data.get('orientations', [])
+        
+        if target_face_idx >= 0 and target_face_idx < len(orientations):
+            # ROTATION MODE: We render 24 images for THIS face
+            rot_vals = orientations[target_face_idx]
+            template_obj.rotation_euler = (rot_vals[0], rot_vals[1], rot_vals[2])
+            bpy.context.view_layer.update()
+            snap_to_ground([template_obj])
+            
+            # Render 24 photos (15 degree steps)
+            num_rot_images = 24
+            rots_per_face = num_rot_images
         else:
-            # Use the first (and only) piece
-            template = unique_meshes[0]
-            template_obj = template['obj']
-            class_id = template['id']
-            ldraw_id_ref = template_obj.get('ldraw_id', set_id)
-            color_id_ref = template.get('color_id', -1)
-            color_name_ref = template.get('color_name') or ''
+            # FALLBACK: Use random physics (original behavior)
+            print("⚠️ No stable face provided, falling back to random physics...")
+            num_rot_images = data.get('ref_num_images', 300)
+            rots_per_face = 1 # We'll do random drops
+            num_drops = num_rot_images
             
-            # Place piece at center of the 20x20cm zone
-            template_obj.location = (0, 0, 0.001)  # Just above ground
-            set_origin_to_center(template_obj)
+        # 0. faiss / perfect-fit setup...
+        # 1. Optics & Resolution
+        if 'Camera' in bpy.data.objects:
+            cam_obj = bpy.data.objects['Camera']
+            cam_obj.data.lens = 210.0  # 12x12cm FOV at 70cm
+        
+        scene = bpy.context.scene
+        scene.render.resolution_x = 384
+        scene.render.resolution_y = 384
+        scene.render.resolution_percentage = 100
+        
+        # 2. Adaptive High-Contrast Background
+        dark_ids = [0, 1, 2, 6, 8, 22, 272, 288, 320]
+        color_id_ref = template.get('color_id', -1)
+        color_name_ref = template.get('color_name') or ''
+        is_dark_piece = color_id_ref in dark_ids
+        ground_obj = bpy.data.objects.get("Plane")
+        
+        bg_color = (1.0, 1.0, 1.0, 1.0) if is_dark_piece else (0.0, 0.0, 0.0, 1.0)
+        contrast_label = "WHITE" if is_dark_piece else "BLACK"
+        print(f"  🌓 High Contrast Mode: Piece {ldraw_id_ref} (Color {color_id_ref}) -> {contrast_label} background.")
+        
+        if ground_obj:
+            ground_obj.hide_render = False
+            if not ground_obj.data.materials:
+                mat = bpy.data.materials.new(name="ContrastGround")
+                ground_obj.data.materials.append(mat)
+            mat = ground_obj.data.materials[0]
+            mat.use_nodes = True
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if bsdf:
+                for link in list(mat.node_tree.links):
+                    if link.to_socket == bsdf.inputs['Base Color']:
+                        mat.node_tree.links.remove(link)
+                bsdf.inputs['Base Color'].default_value = bg_color
+                bsdf.inputs['Roughness'].default_value = 1.0
+                if 'Specular' in bsdf.inputs:
+                    bsdf.inputs['Specular'].default_value = 0.0
+                elif 'Specular IOR Level' in bsdf.inputs:
+                    bsdf.inputs['Specular IOR Level'].default_value = 0.0
+        
+        if scene.world and scene.world.use_nodes:
+            bg_node = next((n for n in scene.world.node_tree.nodes if n.type == 'BACKGROUND'), None)
+            if bg_node:
+                bg_node.inputs['Color'].default_value = bg_color
+                bg_node.inputs['Strength'].default_value = 0.1 if not is_dark_piece else 1.0
+        
+        pc = pieces_config[0] if pieces_config else {}
+        piece_tier = pc.get('tier', 'REF').upper()
+        if hasattr(scene, 'cycles'):
+            scene.cycles.use_adaptive_sampling = True
+            scene.cycles.adaptive_threshold = 0.05
+            if piece_tier == 'TIER1' or piece_tier == 'REF':
+                scene.cycles.samples = 32
+                scene.cycles.max_bounces = 2
+            elif piece_tier == 'TIER2':
+                scene.cycles.samples = 64
+                scene.cycles.max_bounces = 4
+            else: 
+                scene.cycles.samples = 128
+                scene.cycles.max_bounces = 6
+            print(f"  ⚡ TIER {piece_tier} Optimization: {scene.cycles.samples} samples active.")
             
-            # 300 images: Full random 3D rotations and ground snapping
-            ref_n_images = data.get('ref_num_images', 300)
-            
-            img_count = 0
-            offset_idx = data.get('offset_idx', 0)
-            worker_id = data.get('worker_id', '')
-            prefix_base = f"w{worker_id}_" if worker_id != '' else ""
-            
-            # --- FAISS OPTIMIZATION SETUP ---
-            # 1. Optics & Resolution
-            if 'Camera' in bpy.data.objects:
-                cam_obj = bpy.data.objects['Camera']
-                cam_obj.data.lens = 210.0  # 12x12cm FOV at 70cm
-            
-            scene = bpy.context.scene
-            scene.render.resolution_x = 384
-            scene.render.resolution_y = 384
-            scene.render.resolution_percentage = 100
-            
-            # 2. Adaptive High-Contrast Background
-            # Color IDs for dark pieces (Black, Blue, Green, Dk Gray, etc.)
-            dark_ids = [0, 1, 2, 6, 8, 22, 272, 288, 320]
-            is_dark_piece = color_id_ref in dark_ids
-            ground_obj = bpy.data.objects.get("Plane")
-            
-            # Determine background color based on contrast
-            bg_color = (1.0, 1.0, 1.0, 1.0) if is_dark_piece else (0.0, 0.0, 0.0, 1.0)
-            contrast_label = "WHITE" if is_dark_piece else "BLACK"
-            print(f"  🌓 High Contrast Mode: Piece {ldraw_id_ref} (Color {color_id_ref}) -> {contrast_label} background.")
-            
-            # 2a. Configure Ground
-            scene.render.film_transparent = False
-            if ground_obj:
-                ground_obj.hide_render = False
-                if not ground_obj.data.materials:
-                    mat = bpy.data.materials.new(name="ContrastGround")
-                    ground_obj.data.materials.append(mat)
-                mat = ground_obj.data.materials[0]
-                mat.use_nodes = True
-                bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
-                if bsdf:
-                    # Clear links to Base Color
-                    for link in list(mat.node_tree.links):
-                        if link.to_socket == bsdf.inputs['Base Color']:
-                            mat.node_tree.links.remove(link)
-                    bsdf.inputs['Base Color'].default_value = bg_color
-                    bsdf.inputs['Roughness'].default_value = 1.0
-                    bsdf.inputs['Specular'].default_value = 0.0 if hasattr(bsdf.inputs, 'Specular') else 0.0
-            
-            # 2b. Configure World/Environment
-            if scene.world and scene.world.use_nodes:
-                bg_node = next((n for n in scene.world.node_tree.nodes if n.type == 'BACKGROUND'), None)
-                if bg_node:
-                    bg_node.inputs['Color'].default_value = bg_color
-                    # For black background, we need extra lights to see the piece
-                    bg_node.inputs['Strength'].default_value = 0.1 if not is_dark_piece else 1.0
-            
-            # 3. M4 Pro Render Tiering
-            piece_tier = pc.get('tier', 'REF').upper()
-            if hasattr(scene, 'cycles'):
-                scene.cycles.use_adaptive_sampling = True
-                scene.cycles.adaptive_threshold = 0.05
-                # Base MetalRT / GPU settings are handled globally by setup_render_engine
-                
-                if piece_tier == 'TIER1' or piece_tier == 'REF':
-                    scene.cycles.samples = 32
-                    scene.cycles.max_bounces = 2
-                    scene.cycles.diffuse_bounces = 1
-                    scene.cycles.glossy_bounces = 1
-                elif piece_tier == 'TIER2':
-                    scene.cycles.samples = 64
-                    scene.cycles.max_bounces = 4
-                    scene.cycles.diffuse_bounces = 2
-                    scene.cycles.glossy_bounces = 2
-                else: # TIER3
-                    scene.cycles.samples = 128
-                    scene.cycles.max_bounces = 6
-                    scene.cycles.diffuse_bounces = 3
-                    scene.cycles.glossy_bounces = 3
-                print(f"  ⚡ TIER {piece_tier} Optimization: {scene.cycles.samples} samples, {scene.cycles.max_bounces} bounces.")
-            
-            # --- PHYSICS STABILITY SETUP ---
-            SETTLE_FRAMES = 150
-            num_drops = 30
-            rots_per_face = max(1, ref_n_images // num_drops)
-            
-            # Setup Rigid Body for the template
+        # --- EXECUTION LOOP ---
+        img_count = 0
+        offset_idx = data.get('offset_idx', 0)
+        worker_id = data.get('worker_id', '')
+        prefix_base = f"w{worker_id}_" if worker_id != '' else ""
+        class_id = template.get('id', 0)
+        num_images_final = num_rot_images # Total images for this worker
+
+        # Physics Setup (if needed)
+        SETTLE_FRAMES = 150
+        if target_face_idx < 0:
             bpy.context.view_layer.objects.active = template_obj
             if not template_obj.rigid_body:
                 bpy.ops.rigidbody.object_add()
             template_obj.rigid_body.type = 'ACTIVE'
-            # Convex Hull is faster and accurate enough for stable resting faces
             template_obj.rigid_body.collision_shape = 'CONVEX_HULL'
-            template_obj.rigid_body.friction = 1.0
-            template_obj.rigid_body.restitution = 0.0
-            template_obj.rigid_body.linear_damping = 0.6
-            template_obj.rigid_body.angular_damping = 0.6
 
-            for d in range(num_drops):
-                # Reset simulation for each drop
+        # Loop logic
+        num_iters = 1 if target_face_idx >= 0 else num_drops
+        
+        for i_iter in range(num_iters):
+            if target_face_idx < 0:
                 scene.frame_set(1)
                 bpy.ops.ptcache.free_bake_all()
-                
-                # 1. Random Toss (Drop from 5cm)
                 template_obj.location = (0, 0, 0.05)
-                template_obj.rotation_euler = (
-                    random.uniform(0, 6.28),
-                    random.uniform(0, 6.28),
-                    random.uniform(0, 6.28)
-                )
-                
-                # 2. Settle Simulation
+                template_obj.rotation_euler = (random.random()*6.28, random.random()*6.28, random.random()*6.28)
                 for f in range(1, SETTLE_FRAMES + 1):
                     scene.frame_set(f)
-                
-                # Post-physics snap for ground contact
                 snap_to_ground([template_obj])
+
+            for r in range(rots_per_face):
+                if target_face_idx >= 0:
+                    rot_vals = orientations[target_face_idx]
+                    template_obj.rotation_euler = (rot_vals[0], rot_vals[1], rot_vals[2])
+                    template_obj.rotation_euler[2] += (r * (2.0 * math.pi / 24.0)) 
+                else:
+                    template_obj.rotation_euler[2] += (2.0 * math.pi / rots_per_face) + random.uniform(-0.05, 0.05)
                 
-                # 3. Capture N Z-rotations per face
-                for r in range(rots_per_face):
-                    # Z-axis rotation for viewing diversity
-                    template_obj.rotation_euler[2] += (6.28 / rots_per_face) + random.uniform(-0.05, 0.05)
-                    bpy.context.view_layer.update()
-                    
-                    # 🚀 PERFECT-FIT CAMERA CALCULATION 🚀
-                    # Centroid based centering + 85% Frame occupancy
-                    center, radius = get_geometry_aabb(template_obj)
-                    
-                    if not scene.camera:
-                        scene.camera = bpy.data.objects.get("Camera")
-                    cam_obj = scene.camera
-                    
-                    # Target the centroid directly (compensates for asymmetric shapes)
-                    cam_obj.location.x = center.x
-                    cam_obj.location.y = center.y
-                    
-                    # Calculate required distance for 85% FOV coverage
-                    # FOV_angle_rad = 2 * atan(sensor_width / (2 * focal_length))
-                    # At dist 'd', frame_width = 2 * d * tan(FOV/2)
-                    # We want piece_width (2*radius) = 0.85 * frame_width
-                    # 2*radius = 0.85 * 2 * d * (sensor_width / (2 * focal_length))
-                    # d = (radius * focal_length) / (0.85 * sensor_p_half) where sensor_p_half = sensor_width / 2
-                    focal = cam_obj.data.lens # 126.0 or 210.0
-                    sensor_half = cam_obj.data.sensor_width / 2.0
-                    target_dist = (radius * focal) / (0.85 * sensor_half)
-                    
-                    # Apply Z distance (ensures exact framing regardless of part height)
-                    cam_obj.location.z = center.z + target_dist
-                    cam_obj.data.dof.focus_distance = target_dist
-                    
-                    bpy.context.view_layer.update()
-                    
-                    img_idx = img_count + offset_idx
-                    img_prefix = f"{prefix_base}img_{img_idx:04d}"
-                    render_path = os.path.join(images_dir, f"{img_prefix}.jpg")
-                    scene.render.filepath = render_path
-                    
-                    if img_count % 20 == 0 or img_count == ref_n_images - 1:
-                        print(f"PROGRESS: {img_count + 1}/{ref_n_images} (Perfect-Fit Snap)")
-                    
-                    bpy.ops.render.render(write_still=True)
-                    
-                    # 🎯 PRECISE 2D PROJECTED LABEL (.txt)
-                    label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
-                    verts_3d = get_hierarchy_vertices(template_obj)
-                    if verts_3d:
-                        coords_2d = [world_to_camera_view(scene, scene.camera, v) for v in verts_3d]
-                        x_vals = [c.x for c in coords_2d if c.z > 0]
-                        y_vals = [c.y for c in coords_2d if c.z > 0]
-                        
-                        if x_vals and y_vals:
-                            x_min, x_max = min(x_vals), max(x_vals)
-                            y_min, y_max = min(y_vals), max(y_vals)
-                            
-                            # Normalize according to user formula
-                            x_center = (x_min + x_max) / 2.0
-                            y_center = 1.0 - ((y_min + y_max) / 2.0) # YOLO Invert Y
-                            w_box = x_max - x_min
-                            h_box = y_max - y_min
-                            
-                            with open(label_path, 'w') as lf:
-                                lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}\n")
-                    
-                    # Metadata
-                    meta_path = os.path.join(output_base, "image_meta.jsonl")
-                    with open(meta_path, 'a') as mf:
-                        mf.write(json.dumps({
-                            "img": f"{img_prefix}.jpg",
-                            "ids": [ldraw_id_ref],
-                            "color_ids": [color_id_ref],
-                            "color_names": [color_name_ref]
-                        }) + "\n")
-                    
-                    img_count += 1
-            
-            print(f"✅ ref_pieza complete: {img_count} images rendered for piece {ldraw_id_ref}")
-        
-        print("Blender script finished.")
-        return  # Exit early for ref_pieza mode
+                bpy.context.view_layer.update()
+                
+                # Camera framing
+                center, radius = get_geometry_aabb(template_obj)
+                cam_obj = scene.camera
+                cam_obj.location.x, cam_obj.location.y = center.x, center.y
+                focal = cam_obj.data.lens
+                sensor_half = cam_obj.data.sensor_width / 2.0
+                target_dist = (radius * focal) / (0.85 * sensor_half)
+                cam_obj.location.z = center.z + target_dist
+                cam_obj.data.dof.focus_distance = target_dist
+                bpy.context.view_layer.update()
+
+                # Render
+                img_idx = img_count + offset_idx
+                img_prefix = f"{prefix_base}img_{img_idx:04d}"
+                render_path = os.path.join(images_dir, f"{img_prefix}.jpg")
+                scene.render.filepath = render_path
+                
+                if img_count % 10 == 0:
+                    print(f"PROGRESS: {img_count + 1}/{num_images_final}")
+                bpy.ops.render.render(write_still=True)
+                
+                # Labeling
+                label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
+                verts_3d = get_hierarchy_vertices(template_obj)
+                if verts_3d:
+                    coords_2d = [world_to_camera_view(scene, scene.camera, v) for v in verts_3d]
+                    x_vals = [c.x for c in coords_2d if c.z > 0]
+                    y_vals = [c.y for c in coords_2d if c.z > 0]
+                    if x_vals and y_vals:
+                        x_min, x_max = min(x_vals), max(x_vals)
+                        y_min, y_max = min(y_vals), max(y_vals)
+                        x_center, y_center = (x_min + x_max) / 2.0, 1.0 - ((y_min + y_max) / 2.0)
+                        w_box, h_box = x_max - x_min, y_max - y_min
+                        with open(label_path, 'w') as lf:
+                            lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}\n")
+                
+                # Meta
+                meta_path = os.path.join(output_base, "image_meta.jsonl")
+                with open(meta_path, 'a') as mf:
+                    mf.write(json.dumps({
+                        "img": f"{img_prefix}.jpg",
+                        "ids": [ldraw_id_ref],
+                        "color_ids": [color_id_ref],
+                        "color_names": [color_name_ref]
+                    }) + "\n")
+                
+                img_count += 1
+                if img_count >= num_images_final: break
+            if img_count >= num_images_final: break
+
+        print(f"✅ ref_pieza complete: {img_count} images rendered.")
+        return
+
+    # --- END REF_PIEZA ---
     
     # VALIDATION: Check if objects were imported
     if len(unique_meshes) == 0:
@@ -1481,12 +1598,11 @@ def main():
         # 🎲 Dynamically spawn pieces from available types to reach PARTS_PER_IMAGE
         available_templates = unique_meshes
         
-        # Variety Logic: How many distinct types in this image?
-        # Target 75% of available types, but cannot exceed the total number of physical pieces planned
-        K = min(PARTS_PER_IMAGE, max(1, int(len(available_templates) * 0.75)))
-        # If we have very few types (< 5), just use all of them
-        if len(available_templates) < 5:
-            K = len(available_templates)
+        # Variety Logic (D): How many distinct types in this image?
+        # Passed from tiered model in run_local_render.py
+        K = data.get('different_pieces', min(PARTS_PER_IMAGE, max(1, int(len(available_templates) * 0.75))))
+        # Ensure K doesn't exceed available templates
+        K = min(K, len(available_templates))
             
         selected_templates = random.sample(available_templates, K)
         

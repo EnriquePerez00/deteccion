@@ -98,12 +98,13 @@ class GoldenCropExtractor:
             piece_w = max_x - min_x
             piece_h = max_y - min_y
             
-            # 2. Rescaling Logic (Fase A)
-            scale = 1.0
-            if piece_w > self.target_size or piece_h > self.target_size:
-                scale = self.target_size / max(piece_w, piece_h)
+            # 2. Rescaling Logic (Fase A) - Dynamic Zoom
+            # We want the piece to occupy ~80% of the target_size (384px) to isolate it
+            target_occupancy = 0.8
+            source_crop_size = max(piece_w, piece_h) / target_occupancy
             
-            source_crop_size = self.target_size / scale
+            # Security: Don't zoom in TOO much on tiny noise (min 60px window)
+            source_crop_size = max(source_crop_size, 60)
             
             x1 = int(centroid_x - source_crop_size / 2)
             y1 = int(centroid_y - source_crop_size / 2)

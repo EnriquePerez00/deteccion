@@ -8,12 +8,12 @@ class ModelTrainer:
         self.model_dir = os.path.abspath(model_dir)
         os.makedirs(self.model_dir, exist_ok=True)
         
-    def train_model(self, set_id, dataset_path, epochs=10, progress_callback=None, base_model='yolo11n.pt'):
+    def train_model(self, set_id, dataset_path, epochs=10, progress_callback=None, base_model='yolo26n.pt'):
         """
         Train a YOLO model on the generated dataset.
         dataset_path: Path to the data.yaml file or dataset directory.
         progress_callback: Optional function(progress_percent, status_string)
-        base_model: Path or name of the starting weights (e.g. 'yolo11n.pt' or 'best.pt')
+        base_model: Path or name of the starting weights (e.g. 'yolo26n.pt' or 'best.pt')
         """
         print(f"Initializing YOLO with base: {base_model} for Set {set_id}...")
         model = YOLO(base_model) 
@@ -29,7 +29,7 @@ class ModelTrainer:
                 
             model.add_callback("on_train_epoch_end", on_train_epoch_end)
 
-        project_name = f"yolo11_set_{set_id}"
+        project_name = f"yolo26_set_{set_id}"
         print(f"Starting training on device='mps' for {epochs} epochs...")
         
         if os.path.isdir(dataset_path):
@@ -89,6 +89,6 @@ class ModelTrainer:
             return sorted(models)[-1]
         
         # Fallback to the ultralytics default if no versioned one exists
-        fallback = os.path.join(self.model_dir, f"yolo11_set_{set_id}", "weights", "best.pt")
+        fallback = os.path.join(self.model_dir, f"yolo26_set_{set_id}", "weights", "best.pt")
         return fallback
 

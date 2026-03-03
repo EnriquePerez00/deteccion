@@ -1,0 +1,45 @@
+{
+    "session_reference": "75078-1_20260302_1953",
+    "target_parts": [
+        {
+            "part_id": "60481a",
+            "color_id": 71,
+            "color_name": "Light Bluish Gray"
+        },
+        {
+            "part_id": "32054",
+            "color_id": 0,
+            "color_name": "Black"
+        },
+        {
+            "part_id": "61184",
+            "color_id": 71,
+            "color_name": "Light Bluish Gray"
+        },
+        {
+            "part_id": "3832",
+            "color_id": 72,
+            "color_name": "Dark Bluish Gray"
+        },
+        {
+            "part_id": "2445",
+            "color_id": 71,
+            "color_name": "Light Bluish Gray"
+        },
+        {
+            "part_id": "14769",
+            "color_id": 71,
+            "color_name": "Light Bluish Gray"
+        },
+        {
+            "part_id": "28653",
+            "color_id": 4,
+            "color_name": "Red"
+        }
+    ],
+    "render_settings": {
+        "engine": "CYCLES",
+        "render_mode": "both",
+        "mix_ratio": 0.75
+    }
+}

@@ -175,6 +175,11 @@ def pack_project(output_zip="project.zip", env=None):
                      continue
                      
              arcname = os.path.relpath(filepath, SCRIPT_DIR)
+             
+             # EXCLUSION: Skip loose pieces (ref_pieza) in project packages
+             if "ref_pieza" in arcname:
+                 continue
+                 
              # Prevent Kaggle/Lightning AI from recursively auto-unzipping our inner archives
              if arcname in ['cycles_kernels.zip', 'optix_cache.zip']:
                  arcname = arcname.replace('.zip', '.bin')
@@ -238,6 +243,10 @@ def sync_to_drive():
                     rel_file_path = os.path.relpath(file, SCRIPT_DIR)
                     if rel_file_path.startswith('..'):
                         continue # Safety check
+                    
+                    # EXCLUSION: Skip loose pieces (ref_pieza) for Drive sync
+                    if "ref_pieza" in rel_file_path:
+                        continue
                         
                     print(f"Checking {rel_file_path}...")
                     
