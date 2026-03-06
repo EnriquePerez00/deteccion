@@ -5,11 +5,44 @@ import json
 from datetime import datetime
 import shutil
 from pathlib import Path
+import re
 from src.logic.part_resolver import resolve_set, resolve_piece, update_universal_inventory
 from src.logic.lego_colors import LEGO_COLORS
 from src.logic.model_registry import get_training_status, filter_pending
+from src.logic.analysis_helper import get_stable_faces_for_piece
+
+
+def natural_sort_key(s):
+    """Sort strings containing numbers in natural order (e.g., 1, 2, 11 instead of 1, 11, 2)."""
+    return [int(text) if text.isdigit() else text.lower()
+            for text in re.split('([0-9]+)', str(s))]
 
 def render_launcher_ui(project_root):
+    # --- Sanitize Session State (Ensures radio labels match) ---
+    render_mode_label_map = {
+        "images_mix": "images_mix (mezcla para YOLO)",
+        "ref_pieza": "ref_pieza (referencia 360°)",
+        "both": "both (ambos)",
+    }
+    if 'render_mode_select' in st.session_state:
+        val = st.session_state['render_mode_select']
+        if val in render_mode_label_map:
+            st.session_state['render_mode_select'] = render_mode_label_map[val]
+
+    # --- Initialize Session State Defaults ---
+    if 'training_mode' not in st.session_state:
+        st.session_state['training_mode'] = "Referencia Set"
+    if 'set_id_input' not in st.session_state:
+        st.session_state['set_id_input'] = "75078-1"
+    if 'piece_id_input' not in st.session_state:
+        st.session_state['piece_id_input'] = "2877, 3001"
+    if 'minifig_id_input' not in st.session_state:
+        st.session_state['minifig_id_input'] = "sw0001"
+    if 'num_parts_slider' not in st.session_state:
+        st.session_state['num_parts_slider'] = 5
+    if 'render_mode_select' not in st.session_state:
+        st.session_state['render_mode_select'] = "images_mix (mezcla para YOLO)"
+
     st.header("🚀 LEGO Training Launchpad v2.0")
     st.markdown("Pipeline dual: **ref_pieza** (360° referencia) + **images_mix** (mezcla N/K).")
 
@@ -25,13 +58,13 @@ def render_launcher_ui(project_root):
     col1, _ = st.columns(2)
     with col1:
         if mode == "Referencia Set":
-            target_id = st.text_input("Referencia Set (Batch ID):", value="75078-1", key="set_id_input")
-            num_parts = st.slider("Máximo de piezas random:", 1, 50, 5, key="num_parts_slider")
+            target_id = st.text_input("Referencia Set (Batch ID):", key="set_id_input")
+            num_parts = st.slider("Máximo de piezas random:", 1, 50, key="num_parts_slider")
         elif mode == "Listado de piezas (separado por ,)":
-            target_id = st.text_input("Listado de piezas (separado por ,):", value="2877, 3001", key="piece_id_input")
+            target_id = st.text_input("Listado de piezas (separado por ,):", key="piece_id_input")
             num_parts = len([x.strip() for x in target_id.split(",") if x.strip()])
         else:
-            target_id = st.text_input("Listado de Minifigs (separado por ,):", value="sw0001", key="minifig_id_input")
+            target_id = st.text_input("Listado de Minifigs (separado por ,):", key="minifig_id_input")
             num_parts = len([x.strip() for x in target_id.split(",") if x.strip()])
 
     # --- Color selector per piece (only for manual list mode) ---
@@ -42,20 +75,25 @@ def render_launcher_ui(project_root):
             st.markdown("**🎨 Color por pieza:**")
             color_options = {v["name"]: k for k, v in LEGO_COLORS.items()}
             color_names_list = list(color_options.keys())
-            default_color_name = "White"
-            default_color_idx = color_names_list.index(default_color_name) if default_color_name in color_names_list else 0
+            
+            # Pre-set session state defaults to "White" for any missing color keys
+            # This avoids the selectbox defaulting to index 0 ("Black")
+            for ci, pid in enumerate(raw_piece_ids):
+                sk = f"color_select_{pid}_{ci}"
+                if sk not in st.session_state:
+                    st.session_state[sk] = "White"
+            
             cols_color = st.columns(min(len(raw_piece_ids), 4))
             for ci, pid in enumerate(raw_piece_ids):
                 col_c = cols_color[ci % len(cols_color)]
                 with col_c:
                     selected_color_name = st.selectbox(
-                        f"Pieza `{pid}`:",
+                        f"Pieza `{pid}` ({ci+1}):",
                         color_names_list,
-                        index=default_color_idx,
                         key=f"color_select_{pid}_{ci}"
                     )
                     selected_color_id = color_options[selected_color_name]
-                    piece_color_map[pid] = {"color_id": selected_color_id, "color_name": selected_color_name}
+                    piece_color_map[ci] = {"color_id": selected_color_id, "color_name": selected_color_name}
 
     st.divider()
 
@@ -78,16 +116,24 @@ def render_launcher_ui(project_root):
             detail_parts = resolved
         except: pass
     elif mode == "Listado de piezas (separado por ,)":
-        detail_parts = [
-            {
-                "ldraw_id": x.strip(),
-                "color_id": piece_color_map.get(x.strip(), {}).get("color_id", 15),
-                "color_name": piece_color_map.get(x.strip(), {}).get("color_name", "White"),
-            }
-            for x in target_id.split(",") if x.strip()
-        ]
+        raw_ids = [x.strip() for x in target_id.split(",") if x.strip()]
+        detail_parts = []
+        for i, rid in enumerate(raw_ids):
+            # Smart resolve (Rebrickable -> LDraw mapping)
+            resolved = resolve_piece(rid)
+            detail_parts.append({
+                "ldraw_id": resolved.get("ldraw_id", rid),
+                "part_num": resolved.get("part_num", rid),
+                "name": resolved.get("name", rid),
+                "color_id": piece_color_map.get(i, {}).get("color_id", 15),
+                "color_name": piece_color_map.get(i, {}).get("color_name", "White"),
+            })
     else:
         detail_parts = [{"ldraw_id": x.strip()} for x in target_id.split(",") if x.strip()]
+
+    # Sort pieces by reference (ldraw_id) using natural alphanumeric order
+    if detail_parts:
+        detail_parts.sort(key=lambda x: natural_sort_key(x.get("ldraw_id", "")))
 
     # --- Formula Display ---
     if detail_parts:
@@ -119,7 +165,23 @@ def render_launcher_ui(project_root):
                 N = 0
         
         with col_summary:
-            ref_count = len(detail_parts) * 300
+            # Dynamically calculate ref_count for ref_pieza mode based on stable geometric faces
+            ref_count = 0
+            piece_ref_counts = {} # to display in table
+            
+            if render_mode_key in ('ref_pieza', 'both'):
+                # We need to know exact amounts to show, so check analysis per piece
+                for i, part in enumerate(detail_parts):
+                    p_id = part.get("ldraw_id", str(part))
+                    c_id = int(part.get("color_id", 15))
+                    c_name = part.get("color_name", "White")
+                    is_mf = p_id.startswith('sw') or p_id.startswith('fig')
+                    if not is_mf:
+                        faces = get_stable_faces_for_piece(p_id, c_id, c_name)
+                        count = faces * 24 if faces > 0 else 300 # Fallback 300 if no stable
+                        piece_ref_counts[i] = count
+                        ref_count += count
+            
             st.markdown(f"""
             **📊 Resumen de Imágenes:**
             """)
@@ -151,14 +213,19 @@ def render_launcher_ui(project_root):
         
         # Detailed table
         table_data = []
-        for part in detail_parts:
+        for i, part in enumerate(detail_parts):
             p_id = part.get("ldraw_id", str(part))
+            orig_id = part.get("part_num", p_id)
             is_mf = p_id.startswith('sw') or p_id.startswith('fig')
+            
+            # Show both IDs if they differ to avoid confusion (Rebrickable vs LDraw)
+            display_id = f"{p_id} ({orig_id})" if p_id != orig_id else p_id
+            
             row = {
-                "Pieza": p_id,
+                "Pieza (LDraw)": display_id,
                 "Color": part.get("color_name", "-"),
                 "Tipo": "Minifig" if is_mf else "Regular",
-                "ref_pieza": "300 imgs" if render_mode_key in ('ref_pieza', 'both') else "",
+                "num imagenes": f"{piece_ref_counts.get(i, '—')}" if render_mode_key in ('ref_pieza', 'both') else "",
                 "images_mix": "Excluida" if is_mf else ("Incluida" if render_mode_key in ('images_mix', 'both') else ""),
             }
             table_data.append(row)
@@ -187,6 +254,9 @@ def render_launcher_ui(project_root):
     gen_zip = st.checkbox("📦 Generar paquete ZIP para entrenamiento (Lightning/Kaggle)", value=False, help="Crea un archivo .zip con el dataset y el código fuente. Desactívalo para ahorrar espacio en pruebas locales.")
 
     if st.button("🍎 Iniciar Renderizado Local", type="primary"):
+        # 0. Smart Resume Toggle
+        smart_resume = st.checkbox("🔄 Retomar render incompleto (Smart Resume)", value=True, help="Si se interrumpió el proceso, retoma desde la última imagen generada.")
+
         # 1. Prepare config_train.json
         config_path = os.path.join(project_root, "config_train.json")
         
@@ -200,14 +270,13 @@ def render_launcher_ui(project_root):
                 for p in detail_parts
             ]
         elif mode == "Listado de piezas (separado por ,)":
-            raw_ids = [x.strip() for x in target_id.split(",") if x.strip()]
             all_requested_ids = [
                 {
-                    "part_id": pid,
-                    "color_id": piece_color_map.get(pid, {}).get("color_id", 15),
-                    "color_name": piece_color_map.get(pid, {}).get("color_name", "White"),
+                    "part_id": p['ldraw_id'],
+                    "color_id": p.get('color_id', 15),
+                    "color_name": p.get('color_name', 'White'),
                 }
-                for pid in raw_ids
+                for p in detail_parts
             ]
         else:  # Minifigs
             all_requested_ids = [x.strip() for x in target_id.split(",") if x.strip()]
@@ -216,16 +285,10 @@ def render_launcher_ui(project_root):
             st.warning("⚠️ No hay piezas seleccionadas para renderizar.")
             return
 
-        # Cache check
+        # Cache management
         pending_ids = []
         skipped_ids = []
         render_base = os.path.join(project_root, "render_local")
-        
-        for p_id in all_requested_ids:
-            if isinstance(p_id, dict):
-                p_id_str = p_id.get("part_id", str(p_id))
-            else:
-                p_id_str = str(p_id)
 
         if force_render:
             import shutil
@@ -238,50 +301,81 @@ def render_launcher_ui(project_root):
                         st.write(f"🗑️ Caché borrada: `images_mix`")
                     except: pass
 
-        for p_id in all_requested_ids:
-            if isinstance(p_id, dict):
-                p_id_str = p_id.get("part_id", str(p_id))
+        if smart_resume and render_mode_key in ("images_mix", "both"):
+            mix_dir = os.path.join(render_base, "images_mix", "images")
+            if os.path.exists(mix_dir):
+                existing_mix = [f for f in os.listdir(mix_dir) if f.lower().endswith('.jpg')]
+                if len(existing_mix) < N:
+                    st.info(f"⏳ **Resume YOLO:** Detectadas {len(existing_mix)}/{N} imágenes de mezcla. Blender completará el resto.")
+                elif len(existing_mix) >= N:
+                    st.success(f"✅ Mezcla YOLO ya completada ({len(existing_mix)} imgs).")
+                    # If we only wanted images_mix and it's done, we might skip later
             else:
-                p_id_str = str(p_id)
+                st.info("🆕 Iniciando nueva generación de mezcla YOLO.")
+
+        for i, p_id in enumerate(all_requested_ids):
+            p_id_str = p_id.get("part_id", str(p_id)) if isinstance(p_id, dict) else str(p_id)
+            color_id = p_id.get('color_id', 15) if isinstance(p_id, dict) else 15
+            dir_key = f"{p_id_str}_{color_id}"
 
             if force_render:
                 # 2. Clear per-piece cache if applicable
                 if render_mode_key in ("ref_pieza", "both"):
                     import shutil
+                    # Use color-aware directory key: {p_id}_{color_id}
                     for check_dir in [
-                        os.path.join(render_base, "ref_pieza", p_id_str),
-                        os.path.join(render_base, p_id_str), # legacy
+                        os.path.join(render_base, "ref_pieza", dir_key),
+                        os.path.join(render_base, "ref_pieza", p_id_str),  # legacy
+                        os.path.join(render_base, p_id_str),  # legacy
                     ]:
                         if os.path.exists(check_dir):
                             try:
                                 shutil.rmtree(check_dir)
-                                st.write(f"🗑️ Caché borrada: `ref_pieza/{p_id_str}`")
+                                st.write(f"🗑️ Caché borrada: `ref_pieza/{os.path.basename(check_dir)}`")
                             except: pass
                 
-                if isinstance(p_id, dict):
-                    pending_ids.append(p_id)
-                else:
-                    pending_ids.append(p_id_str)
+                pending_ids.append(p_id)
                 continue
 
             # Check both new structure and legacy
-            for check_dir in [
-                os.path.join(render_base, "ref_pieza", p_id_str, "images"),
-                os.path.join(render_base, p_id_str, "images"),
-            ]:
-                if os.path.exists(check_dir):
-                    existing_imgs = [f for f in os.listdir(check_dir) if f.lower().endswith('.jpg')]
-                    if len(existing_imgs) > 0:
-                        skipped_ids.append(p_id_str)
+            found_dir = None
+            if render_mode_key in ("ref_pieza", "both"):
+                for check_dir in [
+                    os.path.join(render_base, "ref_pieza", dir_key, "images"),
+                    os.path.join(render_base, "ref_pieza", p_id_str, "images"),
+                    os.path.join(render_base, p_id_str, "images"),
+                ]:
+                    if os.path.exists(check_dir):
+                        found_dir = check_dir
                         break
-            else:
-                if isinstance(p_id, dict):
+            
+            if found_dir:
+                existing_imgs = [f for f in os.listdir(found_dir) if f.lower().endswith('.jpg')]
+                required = piece_ref_counts.get(i, 300)
+                
+                if smart_resume and len(existing_imgs) < required:
+                    st.info(f"⏳ **Resume:** Pieza {p_id_str} está incompleta ({len(existing_imgs)}/{required} imgs). Borrando parcial y retomando de cero...")
+                    try:
+                        shutil.rmtree(os.path.dirname(found_dir))
+                    except: pass
                     pending_ids.append(p_id)
+                elif len(existing_imgs) >= required:
+                    skipped_ids.append(p_id_str)
                 else:
-                    pending_ids.append(p_id_str)
+                    pending_ids.append(p_id)
+            else:
+                # If it's ref_pieza mode and dir not found, it's pending.
+                # If it's pure images_mix mode, pieces are always "pending" to be included in random drops,
+                # but we don't count them as "skipped" based on ref folders.
+                pending_ids.append(p_id)
+        
+        # In images_mix only mode, we don't skip pieces based on ref folders
+        if render_mode_key == "images_mix":
+            skipped_ids = []
+            pending_ids = all_requested_ids
         
         if skipped_ids:
-            st.info(f"⏭️ **Caché detectada:** Saltando {len(skipped_ids)} piezas: `{', '.join(skipped_ids[:10])}`")
+            st.info(f"⏭️ **Caché detectada:** Saltando {len(skipped_ids)} piezas completas: `{', '.join(skipped_ids[:10])}`")
             
         if not pending_ids:
             st.success("✅ Todas las piezas ya están en caché local.")
@@ -298,6 +392,9 @@ def render_launcher_ui(project_root):
                 "square": st.session_state.get('mix_res_square', False)
             }
             
+
+
+            
             with open(config_path, "w") as f:
                 json.dump({
                     "session_reference": full_ref,
@@ -309,16 +406,15 @@ def render_launcher_ui(project_root):
             st.markdown(f"### ⚙️ Pipeline End-to-End ({render_mode_key})")
             
             # Progress Metrics
-            m1, m2, m3, m4 = st.columns(4)
+            m1, m2, m3, m4, m5 = st.columns(5)
             total_images_ui = m1.metric("Total Imágenes", "Calculando...")
             progress_pct_ui = m2.metric("Progreso Global", "0%")
-            eta_ui = m3.metric("Tiempo Restante", "--:--")
-            status_ui = m4.metric("Fase Actual", "Iniciando...")
+            generated_ui = m3.metric("Imágenes generadas", "0")
+            vector_ui = m4.metric("Vectores creados", f"0/{ref_count}")
+            status_ui = m5.metric("Fase Actual", "Iniciando...")
             
             progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            start_time_render = None
+
             
             # --- PHASE 1: RENDERING (0% to 80%) ---
             status_ui.metric("Fase Actual", "1/2: Renderizado 3D")
@@ -347,10 +443,6 @@ def render_launcher_ui(project_root):
                     
                 if "Progress:" in line:
                     try:
-                        import time as _time
-                        if not start_time_render:
-                            start_time_render = _time.time()
-                            
                         parts_progress = line.split("Progress:")[1].strip().split(" ")[0]
                         done, total = map(int, parts_progress.split("/"))
                         
@@ -358,31 +450,13 @@ def render_launcher_ui(project_root):
                         pct = (done / total) * 0.80
                         progress_bar.progress(min(1.0, pct))
                         progress_pct_ui.metric("Progreso Global", f"{int(pct*100)}%")
-                        status_text.text(f"🚀 Renderizando imagen {done} de {total}...")
+
                         
-                        # ETA Logic
-                        if done > 2: # Wait for some samples for stability
-                            elapsed = _time.time() - start_time_render
-                            per_img = elapsed / done
-                            rem_imgs = total - done
-                            eta_secs = int(rem_imgs * per_img)
-                            
-                            if eta_secs > 3600:
-                                h = eta_secs // 3600
-                                m = (eta_secs % 3600) // 60
-                                eta_str = f"{h}h {m}m"
-                            elif eta_secs > 60:
-                                m = eta_secs // 60
-                                s = eta_secs % 60
-                                eta_str = f"{m}m {s}s"
-                            else:
-                                eta_str = f"{eta_secs}s"
-                            eta_ui.metric("Tiempo Restante", eta_str)
+                        # Update Generated Images metric
+                        generated_ui.metric("Imágenes generadas", f"{done}")
                             
                     except: pass
-                else:
-                    l_strip = line.strip()
-                    if l_strip: status_text.text(f"Render: {l_strip}")
+
             
             process_render.wait()
             render_success = (process_render.returncode == 0)
@@ -390,7 +464,7 @@ def render_launcher_ui(project_root):
             # --- PHASE 2: VECTOR INDEXING (80% to 100%) ---
             if render_success:
                 status_ui.metric("Fase Actual", "2/2: Vectores FAISS")
-                status_text.text("🧠 Iniciando extracción DINOv2 y Clustering...")
+
                 progress_bar.progress(0.85)
                 progress_pct_ui.metric("Progreso Global", "85%")
                 
@@ -399,11 +473,14 @@ def render_launcher_ui(project_root):
                 env = dict(os.environ, PYTHONUNBUFFERED='1')
                 process_index = subprocess.Popen(cmd_index, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
                 
+                vectors_processed = 0
                 for line in process_index.stdout:
                     l_strip = line.strip()
                     if l_strip:
-                        status_text.text(f"Vectores: {l_strip}")
-                        if "PROGRESS:" in l_strip:
+                        if l_strip.startswith("VECTOR_PROCESSED:"):
+                            vectors_processed += 1
+                            vector_ui.metric("Vectores creados", f"{vectors_processed}/{ref_count}")
+                        elif "PROGRESS:" in l_strip:
                             try:
                                 # Example line: "PROGRESS: 5/10 | Processing ..."
                                 prog_part = l_strip.split("PROGRESS:")[1].split("|")[0].strip()
@@ -414,9 +491,10 @@ def render_launcher_ui(project_root):
                                 progress_bar.progress(min(0.99, pct))
                                 progress_pct_ui.metric("Progreso Global", f"{int(pct*100)}%")
                             except: pass
-                        elif "Unified index saved" in l_strip:
+                        elif "Unified index updated" in l_strip or "Part index saved" in l_strip:
                             progress_bar.progress(0.98)
                             progress_pct_ui.metric("Progreso Global", "98%")
+
                 
                 process_index.wait()
                 index_success = (process_index.returncode == 0)
@@ -429,28 +507,17 @@ def render_launcher_ui(project_root):
             pipeline_success = True
 
         if pipeline_success:
+
+            status_ui.success("Pipeline finalizado con éxito")
             if not skip_render:
                 progress_bar.progress(1.0)
                 progress_pct_ui.metric("Progreso Global", "100%")
                 status_ui.metric("Fase Actual", "Completado ✅")
-                status_text.text("🎉 Pipeline End-to-End finalizado con éxito.")
+
             st.success("✅ Renderizado e Indexación Vectorial completados localmente.")
             render_dir = os.path.join(project_root, "render_local")
             all_images = list(Path(render_dir).rglob("images/*.jpg"))
-            if all_images:
-                import random
-                st.markdown("### 🖼️ Muestras Aleatorias")
-                
-                if st.button("🔄 Refrescar Muestras"):
-                    st.rerun()
 
-                cols = st.columns(4)
-                num_to_show = min(4, len(all_images))
-                samples = random.sample(all_images, num_to_show)
-                for i, img_p in enumerate(samples):
-                    piece_id = img_p.parent.parent.name
-                    cols[i].image(str(img_p), caption=f"Pieza: {piece_id}", use_container_width=True)
-            
             import glob as _glob
             zips = sorted(_glob.glob(os.path.join(project_root, "lightning_dataset_*.zip")))
             if zips:

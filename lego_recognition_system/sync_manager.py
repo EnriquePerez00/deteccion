@@ -103,6 +103,12 @@ def get_current_state():
                     filepath = os.path.join(root, file)
                     h = calculate_file_hash(filepath)
                     if h: state[filepath] = h
+            
+    # Add large dataset ZIPs from root
+    import glob
+    for zip_file in glob.glob(os.path.join(SCRIPT_DIR, 'lightning_dataset_*.zip')):
+        h = calculate_file_hash(zip_file)
+        if h: state[zip_file] = h
     return state
 
 def load_previous_state():

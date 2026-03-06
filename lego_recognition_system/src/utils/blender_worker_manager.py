@@ -52,10 +52,10 @@ LOG_INTERVAL = 15          # seconds between status log lines
 # Pressure thresholds  (CPU%, RAM%)
 THRESHOLDS = {
     # Level     CPU_low  CPU_high  RAM_low  RAM_high
-    "CALM":     (0,      50,       0,       60),
-    "MODERATE": (50,     70,       60,      75),
-    "HIGH":     (70,     85,       75,      88),
-    "CRITICAL": (85,     100,      88,      100),
+    "CALM":     (0,      70,       0,       65),
+    "MODERATE": (70,     85,       65,      80),
+    "HIGH":     (85,     92,       80,      90),
+    "CRITICAL": (92,     100,      90,      100),
 }
 
 # Process Priority (Unix 'nice' value: 0 is normal, 19 is lowest, -20 is highest)
@@ -79,8 +79,8 @@ LEVEL_ORDER = [
 # Worker target as fraction of max_workers for each pressure level
 LEVEL_FRACTION = {
     PressureLevel.CALM:     1.00,
-    PressureLevel.MODERATE: 0.75,
-    PressureLevel.HIGH:     0.50,
+    PressureLevel.MODERATE: 0.85,  # Up from 0.75
+    PressureLevel.HIGH:     0.60,  # Up from 0.50
     PressureLevel.CRITICAL: 0.00,   # → min 2 (see _compute_target)
 }
 
@@ -94,11 +94,11 @@ MINIMUM_WORKERS = 2   # Never drop below this (avoids stall)
 def _classify_pressure(cpu_pct: float, ram_pct: float) -> PressureLevel:
     """Return the highest pressure level triggered by current metrics."""
     # Evaluate from highest to lowest; first match wins.
-    if cpu_pct > 85 or ram_pct > 88:
+    if cpu_pct > 92 or ram_pct > 90:
         return PressureLevel.CRITICAL
-    if cpu_pct > 70 or ram_pct > 75:
+    if cpu_pct > 85 or ram_pct > 80:
         return PressureLevel.HIGH
-    if cpu_pct > 50 or ram_pct > 60:
+    if cpu_pct > 70 or ram_pct > 65:
         return PressureLevel.MODERATE
     return PressureLevel.CALM
 

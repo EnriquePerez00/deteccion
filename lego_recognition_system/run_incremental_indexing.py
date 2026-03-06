@@ -50,12 +50,9 @@ def run_full_indexing():
                 if img_count > 0:
                     dirs_to_process.append(piece_dir)
     
-    # Process images_mix directory
-    mix_dir = render_path / "images_mix"
-    if mix_dir.exists() and (mix_dir / "images").exists():
-        img_count = len(list((mix_dir / "images").glob("*.jpg")))
-        if img_count > 0:
-            dirs_to_process.append(mix_dir)
+    # Mix directory is NO LONGER processed here because build_reference_index 
+    # assumes perfectly cropped single-piece images.
+    # Processing images_mix would poison the index with full-scene vectors.
     
     # Process legacy per-piece directories
     for piece_dir in sorted(render_path.iterdir()):

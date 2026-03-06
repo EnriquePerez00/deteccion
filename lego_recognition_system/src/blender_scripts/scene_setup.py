@@ -251,19 +251,28 @@ def clean_scene():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
-def snap_to_ground(objects, ground_z=0.0, max_hover=0.003):
-    """Force any piece still hovering above max_hover down to ground contact.
-    This is a safety net after the physics simulation."""
+def snap_to_ground(objects, ground_z=0.0, max_hover=0.0005):
+    """Force any piece still hovering above ground contact.
+    Uses bounding box to find the absolute bottom point of the piece.
+    """
     snapped = 0
     for obj in objects:
-        if obj.location.z > ground_z + max_hover:
-            # Check if piece is supposed to rest on another piece
-            if obj.location.z > ground_z + 0.01:  # > 1cm above ground
-                # Special case for ref_pieza: move to ground
-                obj.location.z = ground_z + 0.001
-                snapped += 1
+        bpy.context.view_layer.update() # Ensure matrices are current
+        corners = get_hierarchy_corners(obj)
+        if not corners: continue
+        
+        min_z = min(c.z for c in corners)
+        
+        # If it's too high or buried below surface
+        if min_z > (ground_z + max_hover) or min_z < (ground_z - 0.0001):
+            # Shift the whole object hierarchy up so min_z is at ground_z + tiny margin
+            # Margin avoids Z-fighting and ensures shadows render correctly
+            offset = ground_z - min_z + 0.0001
+            obj.location.z += offset
+            snapped += 1
+            
     if snapped > 0:
-        print(f"  📌 Post-physics snap: {snapped} pieces adjusted to ground.")
+        print(f"  📌 Hierarchy snap: {snapped} pieces adjusted to ground contact.")
 
 def set_origin_to_center(obj):
     """Sets the origin of the object to its geometric center.
@@ -283,6 +292,9 @@ def setup_camera():
     """
     bpy.ops.object.camera_add(location=(0, 0, 0.7))
     cam = bpy.context.object
+    # In Blender 5.0, camera_add() creates a camera looking straight DOWN (-Z world)
+    # with the default rotation_euler = (0, 0, 0). This is the cenital / top-down view.
+    cam.rotation_euler = (0, 0, 0)
     cam.data.lens = 26.0           # 26mm focal length
     cam.data.sensor_width = 36.0   # Full-frame equivalent
     
@@ -296,7 +308,7 @@ def setup_camera():
     return cam
 
 def setup_lighting():
-    """Create realistic randomized lighting. 5 presets simulating real environments."""
+    """Create realistic, soft natural lighting mimicking windows or overcast skies. No harsh points to avoid zenithal glare."""
     # Delete existing lights
     bpy.ops.object.select_all(action='DESELECT')
     for obj in bpy.context.scene.objects:
@@ -304,90 +316,81 @@ def setup_lighting():
             obj.select_set(True)
     bpy.ops.object.delete()
 
-    # --- Pick one of realistic scenarios ---
-    # favoring environments where the HDRI dominates
-    scenario = random.choice(['overhead', 'warm_side', 'cool_mixed', 'overcast', 'harsh', 'hdri_only', 'hdri_only'])
+    # Base render color management for filmic/AgX to prevent highlight clipping (burnout)
+    try:
+        bpy.context.scene.view_settings.view_transform = 'AgX'
+        bpy.context.scene.view_settings.look = 'Medium Contrast'
+    except Exception as e:
+        print(f"  ⚠️ Warning: AgX not found (using older Blender version?): {e}")
 
-    if scenario == 'hdri_only':
-        print("  🌍 Scenario: Pure HDRI illumination + Subtle Fill.")
-        # Add a very subtle overhead fill just to lift the deep shadows
-        bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
+    # Scenarios focused on soft, wide, off-axis lighting
+    scenario = random.choice(['soft_window', 'overcast_sky', 'studio_softbox'])
+
+    if scenario == 'soft_window':
+        # Large window-like light from the side, angled down
+        # X: 2.0, Z: 1.5 -> approx 45-60 deg angle. Avoid X,Y=0 to prevent direct reflection to camera
+        sign = random.choice([1, -1])
+        bpy.ops.object.light_add(type='AREA', location=(2.0 * sign, 1.0, 1.5))
         key = bpy.context.object
-        key.data.energy = random.uniform(50, 150)
+        key.data.energy = random.uniform(1500, 2500)
+        key.data.color = (1.0, random.uniform(0.95, 1.0), random.uniform(0.9, 1.0)) # Daylight
+        key.data.shape = 'RECTANGLE'
+        key.data.size = 2.5
+        key.data.size_y = 3.5
+        # Point the light roughly towards the center (0,0,0)
+        key.rotation_euler = (math.radians(-40), math.radians(50 * sign), 0)
         
-        # Rim light to highlight edges
-        bpy.ops.object.light_add(type='AREA', location=(0.5, 0.5, 0.4))
-        rim = bpy.context.object
-        rim.rotation_euler = (math.radians(-60), 0, math.radians(45))
-        rim.data.energy = 300
-        return scenario
-
-    if scenario == 'overhead':
-        # Studio overhead panel
-        bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
-        key = bpy.context.object
-        key.data.energy = random.uniform(600, 1000) # Boosted
-        key.data.color = (1.0, random.uniform(0.92, 1.0), random.uniform(0.85, 1.0))
-        key.scale = (1.5, 1.5, 1)
-        # Weak fill from side
-        bpy.ops.object.light_add(type='POINT', location=(random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), 0.8))
+        # Soft, weak fill light on the opposite side to lift deep shadows
+        bpy.ops.object.light_add(type='AREA', location=(-2.0 * sign, -1.0, 1.0))
         fill = bpy.context.object
-        fill.data.energy = random.uniform(100, 250) # Boosted
+        fill.data.energy = random.uniform(300, 600)
+        fill.data.color = (random.uniform(0.8, 0.9), random.uniform(0.85, 0.95), 1.0) # Sky fill
+        fill.data.size = 3.0
+        fill.rotation_euler = (math.radians(-30), math.radians(-45 * sign), 0)
 
-    elif scenario == 'warm_side':
-        # Warm sunlight from one side
-        bpy.ops.object.light_add(type='AREA', location=(random.uniform(1.0, 1.5), random.uniform(-0.5, 0.5), random.uniform(0.8, 1.2)))
-        key = bpy.context.object
-        key.data.energy = random.uniform(800, 1200) # Boosted
-        key.data.color = (1.0, random.uniform(0.80, 0.95), random.uniform(0.65, 0.80))  # subtle warm
-        key.scale = (random.uniform(0.5, 1.0), random.uniform(0.5, 1.0), 1)
-        key.rotation_euler = (0, random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5))
-        # Soft fill opposite side
-        bpy.ops.object.light_add(type='AREA', location=(-random.uniform(0.8, 1.2), 0, random.uniform(0.7, 1.0)))
-        fill = bpy.context.object
-        fill.data.energy = random.uniform(200, 600) # Boosted
-        fill.data.color = (random.uniform(0.7, 0.9), random.uniform(0.8, 1.0), 1.0)  # cool blue fill
-
-    elif scenario == 'cool_mixed':
-        # Multiple colored lights
-        bpy.ops.object.light_add(type='SPOT', location=(-1.2, 1.2, 1.0))
-        l1 = bpy.context.object
-        l1.data.energy = 800
-        l1.data.color = (0.7, 0.8, 1.0) # Cool blue
-        bpy.ops.object.light_add(type='POINT', location=(1.0, -1.0, 0.8))
-        l2 = bpy.context.object
-        l2.data.energy = 500
-        l2.data.color = (1.0, 0.8, 0.7) # Warm orange
-        bpy.ops.object.light_add(type='AREA', location=(0, 0, 1.5))
-        l3 = bpy.context.object
-        l3.data.energy = 300
-        l3.data.color = (0.9, 1.0, 0.9) # Greenish fill
-        l3.scale = (1.0, 1.0, 1)
-
-    elif scenario == 'overcast':
-        # Soft/diffuse: simulate cloudy day, multiple weak lights
-        for _ in range(3):
-            bpy.ops.object.light_add(type='AREA', location=(
-                random.uniform(-0.8, 0.8), random.uniform(-0.8, 0.8), random.uniform(1.0, 1.5)))
+    elif scenario == 'overcast_sky':
+        # Extremely soft, multi-directional weak light mimicking cloud cover
+        # We put 3 large area lights in a ring, avoiding direct top
+        angles = [0, 120, 240]
+        offset = random.uniform(0, 360)
+        for ang in angles:
+            rad = math.radians(ang + offset)
+            # Distance 2m, height 1m
+            x = math.cos(rad) * 2.0
+            y = math.sin(rad) * 2.0
+            bpy.ops.object.light_add(type='AREA', location=(x, y, 1.2))
             l = bpy.context.object
-            l.data.energy = random.uniform(200, 400) # Boosted
-            l.data.color = (random.uniform(0.9, 1.0), random.uniform(0.9, 1.0), random.uniform(0.9, 1.0))
-            l.scale = (random.uniform(4, 8), random.uniform(4, 8), 1)
+            l.data.energy = random.uniform(400, 700)
+            l.data.color = (random.uniform(0.95, 1.0), random.uniform(0.95, 1.0), 1.0)
+            l.data.size = 4.0
+            # Rough aim to center
+            # pitch down ~30 deg, yaw towards center
+            yaw = rad + math.pi
+            l.rotation_euler = (math.radians(60), 0, yaw) # standard Euler rotation for tracking might vary, approximate:
+            
+            # Simple tracking constraint pointing to world origin
+            track = l.constraints.new('TRACK_TO')
+            track.target = bpy.data.objects.get("Plane") # track the ground plane, effectively origin
+            track.track_axis = 'TRACK_NEGATIVE_Z'
+            track.up_axis = 'UP_Y'
+            
+    elif scenario == 'studio_softbox':
+        # Two massive softboxes on left and right, neutral color
+        bpy.ops.object.light_add(type='AREA', location=(1.5, 0.0, 1.0))
+        key1 = bpy.context.object
+        key1.data.energy = random.uniform(1000, 1500)
+        key1.data.shape = 'SQUARE'
+        key1.data.size = 2.0
+        key1.rotation_euler = (0, math.radians(45), 0)
+        
+        bpy.ops.object.light_add(type='AREA', location=(-1.5, 0.0, 1.5))
+        key2 = bpy.context.object
+        key2.data.energy = random.uniform(800, 1200)
+        key2.data.shape = 'SQUARE'
+        key2.data.size = 2.0
+        key2.rotation_euler = (0, math.radians(-45), 0)
 
-    else:  # harsh
-        # Single strong point — simulates smartphone flash or task lamp
-        bpy.ops.object.light_add(type='SPOT', location=(
-            random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5), random.uniform(0.8, 1.2)))
-        key = bpy.context.object
-        key.data.energy = random.uniform(600, 1200) # Boosted
-        key.data.spot_size = random.uniform(0.5, 1.2)
-        key.data.color = (1.0, random.uniform(0.88, 1.0), random.uniform(0.80, 1.0))
-        # Very subtle fill to avoid pure black shadows
-        bpy.ops.object.light_add(type='POINT', location=(0, 0, 0.7))
-        fill = bpy.context.object
-        fill.data.energy = random.uniform(50, 120) # Boosted
-
-    print(f"  💡 Lighting scenario: '{scenario}'")
+    print(f"  💡 Natural Lighting scenario: '{scenario}'")
     
     # --- EEVEE Contact Shadows: Activate on all lights to darken contact points ---
     for obj in bpy.context.scene.objects:
@@ -625,20 +628,49 @@ def setup_world_hdri(assets_dir):
 
 
 def setup_ground_texture(ground_obj, assets_dir):
-    """Sets a random texture from assets_dir/backgrounds/dynamic_pool for the ground plane."""
-    # First try dynamic_pool, fallback to backgrounds
-    bg_dir = os.path.join(assets_dir, "backgrounds", "dynamic_pool")
-    if not os.path.exists(bg_dir):
-        bg_dir = os.path.join(assets_dir, "backgrounds")
-    if not os.path.exists(bg_dir):
+    """
+    Sets the ground texture following the 50/25/25 rule:
+    - 50%: Fixed background (fondo 50 x 50.jpg)
+    - 25%: Color-jittered version of fixed background
+    - 25%: Realistic textures from dynamic_pool
+    """
+    roll = random.random()
+    
+    fixed_bg_path = os.path.join(assets_dir, "backgrounds", "fondo 50 x 50.jpg")
+    dynamic_pool_dir = os.path.join(assets_dir, "backgrounds", "dynamic_pool")
+    
+    mode = "FIXED"
+    bg_path = fixed_bg_path
+    
+    if roll < 0.50:
+        mode = "FIXED"
+        bg_path = fixed_bg_path
+    elif roll < 0.75:
+        mode = "JITTER"
+        bg_path = fixed_bg_path
+    else:
+        mode = "DYNAMIC"
+        if os.path.exists(dynamic_pool_dir):
+            bg_files = [f for f in os.listdir(dynamic_pool_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff'))]
+            if bg_files:
+                bg_path = os.path.join(dynamic_pool_dir, random.choice(bg_files))
+            else:
+                # Fallback to fixed
+                bg_path = fixed_bg_path
+        else:
+            bg_path = fixed_bg_path
+
+    if not os.path.exists(bg_path):
+        print(f"⚠️ Background path missing: {bg_path}. Falling back to grey.")
+        # Fallback to simple color if file is missing
+        if ground_obj.data.materials:
+            mat = ground_obj.data.materials[0]
+            mat.use_nodes = True
+            bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
+            if bsdf: bsdf.inputs['Base Color'].default_value = (0.5, 0.5, 0.5, 1)
         return
 
-    bg_files = [f for f in os.listdir(bg_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff'))]
-    if not bg_files:
-        return
-
-    bg_path = os.path.join(bg_dir, random.choice(bg_files))
-    print(f"🖼️ Applying Ground Texture: {bg_path}")
+    print(f"🖼️ Applying Ground Texture [{mode}]: {os.path.basename(bg_path)}")
 
     # Get or Create Material
     if not ground_obj.data.materials:
@@ -659,19 +691,38 @@ def setup_ground_texture(ground_obj, assets_dir):
     node_coord = nodes.new(type='ShaderNodeTexCoord')
 
     try:
-        node_tex.image = bpy.data.images.load(bg_path)
+        # Load or use existing image data
+        img_name = os.path.basename(bg_path)
+        if img_name in bpy.data.images:
+            node_tex.image = bpy.data.images[img_name]
+        else:
+            node_tex.image = bpy.data.images.load(bg_path)
     except Exception as e:
         print(f"  ❌ Error loading ground texture: {e}")
         return
 
     links.new(node_coord.outputs['UV'], node_mapping.inputs['Vector'])
     links.new(node_mapping.outputs['Vector'], node_tex.inputs['Vector'])
-    links.new(node_tex.outputs['Color'], node_bsdf.inputs['Base Color'])
+    
+    # --- Color Jitter Logic ---
+    if mode == "JITTER":
+        # Add Hue/Saturation/Value node for color randomization
+        node_hsv = nodes.new(type='ShaderNodeHueSaturation')
+        node_hsv.inputs['Hue'].default_value = random.uniform(0.45, 0.55)
+        node_hsv.inputs['Saturation'].default_value = random.uniform(0.8, 1.2)
+        node_hsv.inputs['Value'].default_value = random.uniform(0.8, 1.2)
+        
+        links.new(node_tex.outputs['Color'], node_hsv.inputs['Color'])
+        links.new(node_hsv.outputs['Color'], node_bsdf.inputs['Base Color'])
+    else:
+        links.new(node_tex.outputs['Color'], node_bsdf.inputs['Base Color'])
+
     links.new(node_bsdf.outputs['BSDF'], node_out.inputs['Surface'])
 
     # Randomized Rotation and Roughness
-    node_mapping.inputs['Rotation'].default_value[2] = random.choice([0, 1.57, 3.14, 4.71])
+    node_mapping.inputs['Rotation'].default_value[2] = random.uniform(0, 6.28)
     node_bsdf.inputs['Roughness'].default_value = random.uniform(0.6, 1.0)
+    node_bsdf.inputs['Specular IOR Level'].default_value = 0.2 if mode == "DYNAMIC" else 0.5
     
 def _apply_bevel_to_mesh(obj):
     """Add a bevel modifier to all meshes in hierarchy for realistic edge specular highlights.
@@ -906,7 +957,6 @@ def get_convex_hull(points):
 
 def get_mabr(hull):
     """Computes the Minimum Area Bounding Rectangle (OBB) for a convex hull."""
-    import math
     min_area = float('inf')
     best_rect = None
     n = len(hull)
@@ -953,14 +1003,219 @@ def get_mabr(hull):
             
     return best_rect
 
-# ... (existing imports)
-
 # Import LDrawResolver from local module
 try:
     from ldraw_resolver import LDrawResolver
 except ImportError:
-    # If running from Blender, verify sys.path
     pass
+
+
+# ═══════════════════════════════════════════════════════════
+# YOLO LABELING HELPERS
+# ═══════════════════════════════════════════════════════════
+
+def generate_yolo_bbox_label(obj, scene, class_id):
+    """Generate a YOLO bounding box label for a single object.
+    Returns: string 'class_id cx cy w h' or None if object is not visible.
+    """
+    verts_3d = get_hierarchy_vertices(obj)
+    if not verts_3d:
+        return None
+    coords_2d = [world_to_camera_view(scene, scene.camera, v) for v in verts_3d]
+    x_vals = [c.x for c in coords_2d if c.z > 0]
+    y_vals = [c.y for c in coords_2d if c.z > 0]
+    if not x_vals or not y_vals:
+        return None
+    x_min, x_max = min(x_vals), max(x_vals)
+    y_min, y_max = min(y_vals), max(y_vals)
+    x_center = (x_min + x_max) / 2.0
+    y_center = 1.0 - ((y_min + y_max) / 2.0)
+    w_box = x_max - x_min
+    h_box = y_max - y_min
+    return f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}"
+
+
+def generate_yolo_seg_label(obj, scene):
+    """Generate a YOLO segmentation polygon label for a single object.
+    Returns: string 'class_id x1 y1 x2 y2 ...' or None if object is not visible.
+    """
+    camera = scene.camera
+    verts_3d = get_hierarchy_vertices(obj)
+    if not verts_3d:
+        return None
+    coords_2d = [world_to_camera_view(scene, camera, coord) for coord in verts_3d]
+    visible_points = []
+    for c in coords_2d:
+        if c.z > 0:
+            cx = max(0.0, min(1.0, c.x))
+            cy = max(0.0, min(1.0, c.y))
+            visible_points.append((cx, cy))
+    if not visible_points:
+        return None
+    hull = get_convex_hull(visible_points)
+    if not hull or len(hull) < 3:
+        return None
+    # Check minimum size to filter microscopic noise
+    xs = [p[0] for p in hull]
+    ys = [p[1] for p in hull]
+    if (max(xs) - min(xs)) < 0.0005 or (max(ys) - min(ys)) < 0.0005:
+        return None
+    # Build YOLO-Seg format: class x1 y1 x2 y2 ... xn yn
+    if 'class_id' not in obj:
+        return None
+    pts = []
+    for corner in hull:
+        px = max(0.0, min(1.0, corner[0]))
+        py = max(0.0, min(1.0, 1.0 - corner[1]))  # Invert Y for YOLO
+        pts.extend([f"{px:.6f}", f"{py:.6f}"])
+    return f"{obj['class_id']} {' '.join(pts)}"
+
+
+def write_image_meta(meta_path, img_prefix, ids, color_ids, color_names):
+    """Append one line of metadata to the JSONL file."""
+    with open(meta_path, 'a') as mf:
+        mf.write(json.dumps({
+            "img": f"{img_prefix}.jpg",
+            "ids": ids,
+            "color_ids": color_ids,
+            "color_names": color_names
+        }) + "\n")
+
+
+# ═══════════════════════════════════════════════════════════
+# GEOMETRY HELPERS (Formerly inside main())
+# ═══════════════════════════════════════════════════════════
+
+def get_stable_orientations(obj):
+    """Analyzes piece geometry using its Convex Hull to find
+    all stable resting positions on a flat surface.
+    Returns a list of Euler rotations, one per stable face.
+    """
+    import bmesh
+    from mathutils import Matrix
+
+    bpy.context.view_layer.update()
+    me = obj.to_mesh()
+    bm = bmesh.new()
+    bm.from_mesh(me)
+
+    bmesh.ops.convex_hull(bm, input=bm.verts)
+
+    stable_faces = []
+    com = Vector((0, 0, 0))
+    for v in bm.verts:
+        com += v.co
+    com /= len(bm.verts)
+
+    for face in bm.faces:
+        if face.calc_area() < 1e-6:
+            continue
+        normal = face.normal.copy()
+        center = face.calc_center_median()
+        target_down = Vector((0, 0, -1))
+
+        # Project CoM onto the face plane
+        rel_com = com - center
+        dist_to_plane = rel_com.dot(normal)
+        projected_com = com - (dist_to_plane * normal)
+
+        # Check if projected CoM is inside the face polygon
+        is_inside = True
+        min_dist_to_edge = float('inf')
+        
+        for edge in face.edges:
+            v1 = edge.verts[0].co
+            v2 = edge.verts[1].co
+            edge_vec = v2 - v1
+            edge_len = edge_vec.length
+            
+            if edge_len < 1e-6:
+                continue
+                
+            to_com = projected_com - v1
+            cross_vec = edge_vec.cross(to_com)
+            side = cross_vec.dot(normal)
+            
+            dist = cross_vec.length / edge_len
+            
+            if side < -1e-6:
+                is_inside = False
+                break
+                
+            if dist < min_dist_to_edge:
+                min_dist_to_edge = dist
+
+        # Apply Real-World Physics Filter
+        if is_inside:
+            h_com = abs(dist_to_plane)
+            area = face.calc_area()
+            
+            # Tipping Angle: How far you have to tilt the piece before the CoM 
+            # crosses the edge and it falls over.
+            tipping_angle_rad = math.atan2(min_dist_to_edge, h_com) if h_com > 1e-6 else math.pi/2
+            tipping_angle_deg = math.degrees(tipping_angle_rad)
+            
+            # Realistic thresholds to survive micro-vibrations:
+            # 1. Area > 1e-6 (reject microscopic spikes/corners)
+            # 2. Tipping Angle > 2.0 degrees (reject standing a piece on a tiny edge)
+            if area > 1e-6 and tipping_angle_deg > 2.0:
+                euler_rot = normal.rotation_difference(target_down).to_euler()
+                stable_faces.append(euler_rot)
+
+    # Deduplicate similar orientations (symmetries)
+    distinct_faces = []
+    for rot in stable_faces:
+        is_new = True
+        for existing in distinct_faces:
+            diff = sum(abs(a - b) for a, b in zip(rot, existing))
+            if diff < 0.1:
+                is_new = False
+                break
+        if is_new:
+            distinct_faces.append(rot)
+
+    bm.free()
+    obj.to_mesh_clear()
+    return distinct_faces
+
+
+def apply_bevel_lod(obj, render_res=800, camera_fov_m=0.20):
+    """Reduce bevel segments on small objects to speed up rendering."""
+    try:
+        bpy.context.view_layer.update()
+        dims = obj.dimensions
+        screen_fraction = max(dims.x, dims.y) / camera_fov_m
+        pixel_size = screen_fraction * render_res
+        for mod in obj.modifiers:
+            if mod.type == 'BEVEL':
+                if pixel_size < 80:
+                    mod.segments = 1
+                elif pixel_size < 150:
+                    mod.segments = 2
+        for child in obj.children:
+            apply_bevel_lod(child, render_res, camera_fov_m)
+    except Exception as e:
+        print(f"  ⚠️ Bevel LOD skipped for {obj.name}: {e}")
+
+
+def get_max_xy_radius(obj):
+    """Get the max dimension in XY plane to prevent clipping."""
+    corners = get_hierarchy_corners(obj)
+    if not corners:
+        return 0.02
+    max_r = 0
+    for c in corners:
+        r = math.sqrt(c.x**2 + c.y**2)
+        if r > max_r:
+            max_r = r
+    return max_r
+
+
+def select_hierarchy(obj):
+    """Select an object and all its children recursively."""
+    obj.select_set(True)
+    for c in obj.children:
+        select_hierarchy(c)
 
 
 def main():
@@ -1061,53 +1316,14 @@ def main():
 
     clean_scene()
     
-    # Extract new Tiering parameters
-    # Fallback for old templates
-    # Calibration: iPhone 16 Optics (4:3) - Scaled for YOLO Training
-    # Standard 1920x1440 px (8-9x faster than 24MP, maintains exact aspect ratio/FOVs)
     global_render_engine = data.get('render_engine', 'CYCLES')
-    res_x = data.get('resolution_x', 1920)
-    res_y = data.get('resolution_y', int(res_x * 0.75)) # Force 4:3
-    
-    setup_render_engine(engine=global_render_engine, resolution=(res_x, res_y))
-    
-    # Secondary Resolution Override: Check if a specific piece config has a different resolution
-    if pieces_config and 'res' in pieces_config[0]:
-        px = pieces_config[0]['res']
-        py = int(px * 0.75)
-        # Apply specifically if it's ref_pieza (smaller) to avoid large defaults
-        if render_mode == 'ref_pieza':
-             print(f"  🎯 Mode-specific resolution override: {px}x{py}")
-             setup_render_engine(engine=global_render_engine, resolution=(px, py))
 
     setup_compositor()  # Sensor noise + bloom glare post-processing
     cam = setup_camera()
     setup_lighting()
     setup_world_hdri(assets_dir)
-    
-    # Setup Color Management — AgX for better dynamic range on white pieces
-    # AgX preserves internal stud shadows even on overexposed whites
-    try:
-        color_set = False
-        for transform in ['AgX', 'Filmic', 'Standard']:
-            try:
-                bpy.context.scene.view_settings.view_transform = transform
-                color_set = True
-                print(f"  🎨 Color Transform: {transform} active.")
-                break
-            except TypeError:
-                continue
-        
-        # Balanced exposure: not too dark, not too bright
-        bpy.context.scene.view_settings.exposure = -0.15
-        bpy.context.scene.view_settings.gamma = 1.0
-        bpy.context.scene.sequencer_colorspace_settings.name = 'sRGB'
-    except Exception as e:
-        print(f"Warning: Could not set color management: {e}")
 
     # Create Ground Plane (50x50cm training surface)
-    # Note: Camera at 70cm with 26mm lens covers ~97x73cm FOV.
-    # The 50x50cm plane will be centered, avoiding edge distortions.
     bpy.ops.mesh.primitive_plane_add(size=0.5, location=(0, 0, 0))
     ground = bpy.context.object
     
@@ -1161,35 +1377,16 @@ def main():
     print(f"🔧 Render mode: {render_mode} | Parts per image: {PARTS_PER_IMAGE}")    
 
 
-    # Iterate pieces to setup meshes and render engine
-    # --- BEVEL LOD (Level of Detail) ---
-    def apply_bevel_lod(obj, render_res=800, camera_fov_m=0.20):
-        """Reduce bevel segments on small objects to speed up rendering."""
-        try:
-            bpy.context.view_layer.update()
-            dims = obj.dimensions  # World-space size in metres
-            screen_fraction = max(dims.x, dims.y) / camera_fov_m
-            pixel_size = screen_fraction * render_res
-            for mod in obj.modifiers:
-                if mod.type == 'BEVEL':
-                    if pixel_size < 80:
-                        mod.segments = 1  # Very small piece (<80px)
-                    elif pixel_size < 150:
-                        mod.segments = 2  # Medium piece (80-150px)
-                    # Else: keep original segments for large pieces
-            # Also recurse into children
-            for child in obj.children:
-                apply_bevel_lod(child, render_res, camera_fov_m)
-        except Exception as e:
-            print(f"  ⚠️ Bevel LOD skipped for {obj.name}: {e}")
-
     # --- GLOBAL RENDER SETUP ---
-    # Setup once for the whole run to avoid driver overhead in loops
+    # Calculate final resolution and call setup_render_engine ONCE
     first_pc = pieces_config[0] if pieces_config else {'engine': 'CYCLES', 'res': 800}
-    res_x = first_pc.get('res', 800)
+    if render_mode == 'ref_pieza' and 'res' in first_pc:
+        res_x = first_pc['res']
+    else:
+        res_x = data.get('resolution_x', first_pc.get('res', 1920))
     is_square = data.get('square', False)
     res_y = res_x if (is_square or render_mode != 'images_mix') else int(res_x * 0.75)
-    setup_render_engine(engine=first_pc.get('engine', 'CYCLES'), resolution=(res_x, res_y))
+    setup_render_engine(engine=first_pc.get('engine', global_render_engine), resolution=(res_x, res_y))
     
     for i, pc in enumerate(pieces_config):
         part = pc['part']
@@ -1240,105 +1437,6 @@ def main():
             print(f"  ⚠️ Part path not found for: {ldraw_id}")
             continue
             
-    # Function to get the max dimension in XY plane to prevent clipping out of the 20x20cm surface
-    def get_max_xy_radius(obj):
-        corners = get_hierarchy_corners(obj)
-        if not corners: return 0.02 # Default 2cm
-        max_r = 0
-        for c in corners:
-            # We care about distance from object center in local XY
-            r = math.sqrt(c.x**2 + c.y**2)
-            if r > max_r: max_r = r
-        return max_r
-
-    # ═══════════════════════════════════════════════════════════
-    # STABLE FACE ANALYSIS (New Geometry-Based Approach)
-    # ═══════════════════════════════════════════════════════════
-    def get_stable_orientations(obj):
-        """
-        Analyzes the piece geometry using its Convex Hull to find
-        all stable resting positions on a flat surface.
-        """
-        import bmesh
-        from mathutils import Matrix
-        
-        # 1. Create a copy and apply all transforms
-        bpy.context.view_layer.update()
-        me = obj.to_mesh()
-        bm = bmesh.new()
-        bm.from_mesh(me)
-        
-        # 2. Compute Convex Hull
-        # This gives us all potential 'flat' support surfaces
-        bmesh.ops.convex_hull(bm, input=bm.verts)
-        
-        # 3. Analyze each face of the hull
-        stable_faces = []
-        com = Vector((0, 0, 0))
-        for v in bm.verts: com += v.co
-        com /= len(bm.verts) # Simple center of mass approximation
-        
-        for face in bm.faces:
-            if face.area < 1e-6: continue
-            
-            # Normal of the face in local space
-            normal = face.normal.copy()
-            center = face.calc_center_median()
-            
-            # Rotation to make this face normal point DOWN (-Z) 
-            # so the object 'rests' on the face.
-            # Blender uses +Z as UP, so if face normal is N, 
-            # we want to rotate the object so N is (0,0,-1)
-            target_down = Vector((0, 0, -1))
-            rot_matrix = normal.rotation_difference(target_down).to_matrix().to_4x4()
-            
-            # Project CoM onto the face plane in the 'rest' orientation
-            # If the projected CoM is within the face's boundaries, it's stable.
-            # Local projection check:
-            rel_com = com - center
-            # Component along normal should be 'negative' or zero if CoM is 'above' the face
-            # But the most important check for static equilibrium is if CoM is over the footprint
-            dist_to_plane = rel_com.dot(normal)
-            projected_com = com - (dist_to_plane * normal)
-            
-            # Check if projected_com is inside the face polygon
-            is_inside = True
-            for edge in face.edges:
-                # Vector from edge start to projected CoM
-                v1 = edge.verts[0].co
-                v2 = edge.verts[1].co
-                edge_vec = v2 - v1
-                to_com = projected_com - v1
-                # Cross product with normal should point same way for all edges (convex face)
-                side = (edge_vec.cross(to_com)).dot(normal)
-                if side < -1e-6:
-                    is_inside = False
-                    break
-            
-            if is_inside:
-                # We found a potential stable orientation!
-                # We need the rotation that brings this face to Z=0 and points UP.
-                # Actually, easier to think: Face normal points (0,0,-1).
-                # The Euler we store is what to apply to the object to reach this state.
-                euler_rot = normal.rotation_difference(target_down).to_euler()
-                stable_faces.append(euler_rot)
-
-        # 4. Deduplicate similar orientations (symmetries)
-        distinct_faces = []
-        for rot in stable_faces:
-            is_new = True
-            for existing in distinct_faces:
-                # Check angular difference
-                diff = sum(abs(a - b) for a, b in zip(rot, existing))
-                if diff < 0.1: # Threshold for similarity
-                    is_new = False
-                    break
-            if is_new:
-                distinct_faces.append(rot)
-        
-        bm.free()
-        obj.to_mesh_clear()
-        return distinct_faces
 
     # ═══════════════════════════════════════════════════════════
     # MODE: ref_pieza — Multi-Worker Geometric Strategy
@@ -1400,52 +1498,82 @@ def main():
             rots_per_face = 1 # We'll do random drops
             num_drops = num_rot_images
             
-        # 0. faiss / perfect-fit setup...
-        # 1. Optics & Resolution
-        if 'Camera' in bpy.data.objects:
-            cam_obj = bpy.data.objects['Camera']
-            cam_obj.data.lens = 210.0  # 12x12cm FOV at 70cm
-        
+        # 1. Optics & Resolution — iPhone 16 spec: 26mm / fixed 70cm height
+        # Note: lens stays at 26mm as set by setup_camera(). No override here.
+        # The 26mm at 70cm gives ~63cm horizontal FOV, covering the full 50x50cm surface.
         scene = bpy.context.scene
-        scene.render.resolution_x = 384
-        scene.render.resolution_y = 384
+        # Render at 768×768 so that the downstream crop to 384×384 (FAISS/DINOv2)
+        # operates on full-quality data without any resolution penalty.
+        scene.render.resolution_x = 768
+        scene.render.resolution_y = 768
         scene.render.resolution_percentage = 100
         
         # 2. Adaptive High-Contrast Background
-        dark_ids = [0, 1, 2, 6, 8, 22, 272, 288, 320]
-        color_id_ref = template.get('color_id', -1)
+        # Comprehensive list of dark LEGO color IDs to force white background
+        dark_ids = [
+            0,   # Black
+            1,   # Blue
+            2,   # Green
+            3,   # Dark Turquoise
+            6,   # Brown
+            8,   # Dark Gray
+            22,  # Purple
+            26,  # Magenta
+            28,  # Dark Tan (can be dark depending on lighting)
+            70,  # Reddish Brown
+            72,  # Dark Stone Gray
+            85,  # Dark Bluish Gray
+            272, # Dark Blue
+            288, # Dark Green
+            320, # Dark Red
+            484, # Dark Orange
+        ]
+        
+        try:
+            color_id_ref = int(template.get('color_id', -1))
+        except:
+            color_id_ref = -1
+            
         color_name_ref = template.get('color_name') or ''
-        is_dark_piece = color_id_ref in dark_ids
+        
+        # Detect if piece is dark or if name contains "Dark"
+        is_dark_piece = (color_id_ref in dark_ids) or ("Dark" in color_name_ref) or ("Black" in color_name_ref)
         ground_obj = bpy.data.objects.get("Plane")
         
-        bg_color = (1.0, 1.0, 1.0, 1.0) if is_dark_piece else (0.0, 0.0, 0.0, 1.0)
-        contrast_label = "WHITE" if is_dark_piece else "BLACK"
-        print(f"  🌓 High Contrast Mode: Piece {ldraw_id_ref} (Color {color_id_ref}) -> {contrast_label} background.")
-        
+        # Ensure ground plane is exactly 50×50cm as per physical setup spec
         if ground_obj:
-            ground_obj.hide_render = False
-            if not ground_obj.data.materials:
-                mat = bpy.data.materials.new(name="ContrastGround")
-                ground_obj.data.materials.append(mat)
-            mat = ground_obj.data.materials[0]
-            mat.use_nodes = True
-            bsdf = next((n for n in mat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED'), None)
-            if bsdf:
-                for link in list(mat.node_tree.links):
-                    if link.to_socket == bsdf.inputs['Base Color']:
-                        mat.node_tree.links.remove(link)
-                bsdf.inputs['Base Color'].default_value = bg_color
-                bsdf.inputs['Roughness'].default_value = 1.0
-                if 'Specular' in bsdf.inputs:
-                    bsdf.inputs['Specular'].default_value = 0.0
-                elif 'Specular IOR Level' in bsdf.inputs:
-                    bsdf.inputs['Specular IOR Level'].default_value = 0.0
+            ground_obj.scale = (1.0, 1.0, 1.0)
+            ground_obj.dimensions = (0.5, 0.5, 0.0)  # 50×50cm surface
+            ground_obj.location = (0.0, 0.0, 0.0)    # Centered at origin
         
-        if scene.world and scene.world.use_nodes:
-            bg_node = next((n for n in scene.world.node_tree.nodes if n.type == 'BACKGROUND'), None)
-            if bg_node:
-                bg_node.inputs['Color'].default_value = bg_color
-                bg_node.inputs['Strength'].default_value = 0.1 if not is_dark_piece else 1.0
+        print(f"  🌌 GrabCut Alignment Mode: Piece {ldraw_id_ref} -> Pure Black (0,0,0) with NO ground shadows.")
+        
+        # Enable transparency so the background is cleanly separated from the piece
+        scene.render.film_transparent = True
+        
+        # Re-configure the compositor specifically for ref_pieza to composite over pure black
+        scene.use_nodes = True
+        if hasattr(scene, "node_tree") and scene.node_tree:
+            tree = scene.node_tree
+            tree.nodes.clear()
+            rlayers = tree.nodes.new('CompositorNodeRLayers')
+            comp = tree.nodes.new('CompositorNodeComposite')
+            alpha_over = tree.nodes.new('CompositorNodeAlphaOver')
+            # Input 1 is the background (solid black)
+            alpha_over.inputs[1].default_value = (0.0, 0.0, 0.0, 1.0)
+            
+            tree.links.new(rlayers.outputs['Image'], alpha_over.inputs[2])
+            tree.links.new(alpha_over.outputs['Image'], comp.inputs['Image'])
+            
+        # Hide the ground completely. We don't want any ground shadows, since the
+        # real inference pipeline (GrabCut) removes all shadows alongside the carpet.
+        if ground_obj:
+            ground_obj.hide_render = True
+            
+        # The World can still cast light (HDRI is active), but it won't be seen in the background
+        # because film_transparent = True. This is exactly what we want: HDRI lighting on the piece,
+        # perfectly isolated mask.
+
         
         pc = pieces_config[0] if pieces_config else {}
         piece_tier = pc.get('tier', 'REF').upper()
@@ -1480,6 +1608,18 @@ def main():
             template_obj.rigid_body.type = 'ACTIVE'
             template_obj.rigid_body.collision_shape = 'CONVEX_HULL'
 
+        def place_piece_on_ground(obj):
+            """After any rotation, shift the object so its absolute bottom vertex
+            sits exactly at Z=0 (ground surface). This works for any piece shape,
+            any orientation, any scale."""
+            bpy.context.view_layer.update()
+            corners = get_hierarchy_corners(obj)
+            if not corners:
+                return
+            min_z = min(c.z for c in corners)
+            obj.location.z += (0.0001 - min_z)  # 0.1mm margin above ground
+            bpy.context.view_layer.update()
+
         # Loop logic
         num_iters = 1 if target_face_idx >= 0 else num_drops
         
@@ -1487,67 +1627,140 @@ def main():
             if target_face_idx < 0:
                 scene.frame_set(1)
                 bpy.ops.ptcache.free_bake_all()
-                template_obj.location = (0, 0, 0.05)
+                # Initial drop: piece above ground. Use bbox to know current height
+                bpy.context.view_layer.update()
+                corners_now = get_hierarchy_corners(template_obj)
+                half_height = 0
+                if corners_now:
+                    zs_now = [c.z for c in corners_now]
+                    half_height = (max(zs_now) - min(zs_now)) / 2.0
+                template_obj.location = (0, 0, half_height + 0.03)  # 3cm above ground
                 template_obj.rotation_euler = (random.random()*6.28, random.random()*6.28, random.random()*6.28)
                 for f in range(1, SETTLE_FRAMES + 1):
                     scene.frame_set(f)
-                snap_to_ground([template_obj])
+                place_piece_on_ground(template_obj)
 
             for r in range(rots_per_face):
                 if target_face_idx >= 0:
                     rot_vals = orientations[target_face_idx]
                     template_obj.rotation_euler = (rot_vals[0], rot_vals[1], rot_vals[2])
-                    template_obj.rotation_euler[2] += (r * (2.0 * math.pi / 24.0)) 
+                    template_obj.rotation_euler[2] += (r * (2.0 * math.pi / 24.0))
                 else:
                     template_obj.rotation_euler[2] += (2.0 * math.pi / rots_per_face) + random.uniform(-0.05, 0.05)
                 
+                # ─── CRITICAL: Place piece on ground after EVERY rotation ────────
+                # Each rotation changes which face is at the bottom, so the bounding
+                # box bottom changes. We must re-snap every time.
+                place_piece_on_ground(template_obj)
+                # ────────────────────────────────────────────────────────────────
+                
                 bpy.context.view_layer.update()
                 
-                # Camera framing
-                center, radius = get_geometry_aabb(template_obj)
-                cam_obj = scene.camera
-                cam_obj.location.x, cam_obj.location.y = center.x, center.y
-                focal = cam_obj.data.lens
-                sensor_half = cam_obj.data.sensor_width / 2.0
-                target_dist = (radius * focal) / (0.85 * sensor_half)
-                cam_obj.location.z = center.z + target_dist
-                cam_obj.data.dof.focus_distance = target_dist
+                # ─── CAMERA: Option B — Dynamic height for training ──────────────
+                # ALIGNMENT: We MUST use the true geometric AABB center to target the camera.
+                # Object.location is the origin, which might not be centered after physical rotations.
                 bpy.context.view_layer.update()
+                
+                # Get true visual center and radius from geometry vertices
+                aabb_center, aabb_radius = get_geometry_aabb(template_obj)
+                obj_dim = template_obj.dimensions  # world-space size
+                
+                # Piece top = top of the bounding box
+                piece_top_z = aabb_center.z + (obj_dim.z / 2.0)
+                piece_center_x = aabb_center.x
+                piece_center_y = aabb_center.y
+                radius = aabb_radius
+
+
+                cam_obj = scene.camera
+                
+                # Remove any left-over constraints (HDRI setup may leave constraints)
+                for c in list(cam_obj.constraints):
+                    cam_obj.constraints.remove(c)
+                
+                focal_mm = 26.0
+                sensor_half_mm = 18.0  # 36mm sensor / 2
+                # ALIGNMENT: GoldenCrop scales to ~80% occupancy. 
+                # radius = 40% of sensor half.
+                fill_ratio = 0.40
+
+                # Use at least 5mm radius so tiny pieces don't get extreme close-ups
+                effective_radius = max(radius, 0.005)
+                # target_dist is the optical distance needed to achieve 80% occupancy
+                target_dist = (effective_radius * focal_mm) / (fill_ratio * sensor_half_mm)
+                
+                # CRITICAL ALIGNMENT: Camera MUST stay fixed at 0.70m physical height to 
+                # preserve the exact perspective of the physical setup (iPhone 16 on mount).
+                cam_z = 0.70
+                real_dist = max(0.01, cam_z - piece_top_z)
+                
+                # We achieve the framing of target_dist by using digital zoom (cropping the sensor)
+                # This mathematically emulates cropping a 24MP image perfectly.
+                new_sensor_width = 36.0 * (target_dist / real_dist)
+                
+                cam_obj.location = (piece_center_x, piece_center_y, cam_z)
+                cam_obj.data.lens = focal_mm
+                cam_obj.data.sensor_width = new_sensor_width
+                cam_obj.data.dof.focus_distance = real_dist
+                
+                # Cenital: rotation (0,0,0) looks straight down in Blender 5.0
+                cam_obj.rotation_euler = (0, 0, 0)
+                bpy.context.view_layer.update()
+                print(f"  📷 Camera: FIXED Z=70cm | piece_top={piece_top_z*1000:.1f}mm | "
+                      f"optical_zoom_dist={target_dist*100:.1f}cm | new_sensor_w={new_sensor_width:.2f}mm")
+                # ─────────────────────────────────────────────────────────────────
+
+
+
 
                 # Render
                 img_idx = img_count + offset_idx
                 img_prefix = f"{prefix_base}img_{img_idx:04d}"
                 render_path = os.path.join(images_dir, f"{img_prefix}.jpg")
+                
+                # SMART RESUME: Skip existing images ONLY for images_mix (YOLO) scenes.
+                # Reference renders (ref_pieza) are wiped at piece-level to ensure consistency.
+                if "images_mix" in render_path and os.path.exists(render_path):
+                    print(f"  ⏭️ Image {img_prefix}.jpg already exists, skipping.")
+                    img_count += 1
+                    continue
+                    
                 scene.render.filepath = render_path
                 
                 if img_count % 10 == 0:
                     print(f"PROGRESS: {img_count + 1}/{num_images_final}")
+                # == FINAL DEBUG: state dump before render ==
+                sc = bpy.context.scene
+                print(f"  ▶ render img_{img_idx}: scene.camera={sc.camera.name if sc.camera else 'NONE'}"
+                      f" cam_loc={sc.camera.location!r} cam_rot={sc.camera.rotation_euler!r}"
+                      f" cam_lens={sc.camera.data.lens}mm"
+                      f" film_transparent={sc.render.film_transparent}"
+                      f" use_nodes={sc.use_nodes}")
+                print(f"    template_obj={template_obj.name} loc={template_obj.location!r}"
+                      f" hide={template_obj.hide_render}")
+                all_objs = [(o.name[:20], o.type[:4], o.hide_render, tuple(round(x,3) for x in o.location))
+                            for o in bpy.data.objects if o.type in ('MESH','CAMERA','LIGHT')]
+                print(f"    scene_objects: {all_objs}")
+                # == END DEBUG ==
+                # Compositor is already cleanly configured to do Alpha Over Black for GrabCut alignment.
+                # We do NOT bypass it here anymore.
                 bpy.ops.render.render(write_still=True)
+
+
+
+
+
                 
-                # Labeling
+                # Labeling (using helper)
                 label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
-                verts_3d = get_hierarchy_vertices(template_obj)
-                if verts_3d:
-                    coords_2d = [world_to_camera_view(scene, scene.camera, v) for v in verts_3d]
-                    x_vals = [c.x for c in coords_2d if c.z > 0]
-                    y_vals = [c.y for c in coords_2d if c.z > 0]
-                    if x_vals and y_vals:
-                        x_min, x_max = min(x_vals), max(x_vals)
-                        y_min, y_max = min(y_vals), max(y_vals)
-                        x_center, y_center = (x_min + x_max) / 2.0, 1.0 - ((y_min + y_max) / 2.0)
-                        w_box, h_box = x_max - x_min, y_max - y_min
-                        with open(label_path, 'w') as lf:
-                            lf.write(f"{class_id} {x_center:.6f} {y_center:.6f} {w_box:.6f} {h_box:.6f}\n")
+                bbox_line = generate_yolo_bbox_label(template_obj, scene, class_id)
+                if bbox_line:
+                    with open(label_path, 'w') as lf:
+                        lf.write(bbox_line + "\n")
                 
-                # Meta
+                # Metadata
                 meta_path = os.path.join(output_base, "image_meta.jsonl")
-                with open(meta_path, 'a') as mf:
-                    mf.write(json.dumps({
-                        "img": f"{img_prefix}.jpg",
-                        "ids": [ldraw_id_ref],
-                        "color_ids": [color_id_ref],
-                        "color_names": [color_name_ref]
-                    }) + "\n")
+                write_image_meta(meta_path, img_prefix, [ldraw_id_ref], [color_id_ref], [color_name_ref])
                 
                 img_count += 1
                 if img_count >= num_images_final: break
@@ -1645,6 +1858,11 @@ def main():
                 new_obj.rigid_body.collision_shape = 'CONVEX_HULL'
                 new_obj.rigid_body.friction = 1.0
                 new_obj.rigid_body.restitution = 0.0
+                # Anti-explosion for small pieces (1x1 etc)
+                new_obj.rigid_body.use_margin = True
+                new_obj.rigid_body.collision_margin = 0.0001
+                new_obj.rigid_body.linear_damping = 0.5
+                new_obj.rigid_body.angular_damping = 0.5
                 
                 active_pieces.append(new_obj)
         
@@ -1741,101 +1959,32 @@ def main():
                 
             bpy.ops.render.render(write_still=True)
         
-            # 5. Generate Labels
+            # 5. Generate Labels (using helpers)
             label_path = os.path.join(labels_dir, f"{img_prefix}.txt")
-            # Create a separate metadata file for the indexer to map images to parts
             meta_path = os.path.join(output_base, "image_meta.jsonl")
             
             with open(label_path, 'w') as lf:
-                # If negative sample, the file remains empty (0 bytes) as required by YOLO
                 if not is_empty_background:
                     active_ids_in_image = []
                     active_colors_in_image = []
                     print(f"  🔍 Labeling call: {len(active_pieces)} active pieces.")
-                    for obj in active_pieces: # Iterate only over visible/active pieces!
-                        # print(f"    - Processing {obj.name} at Z={obj.location.z:.2f}")
-                        camera = scene.camera
-                        
-                        # For OBB, using vertices is much more accurate than the 8 bounding box corners
-                        # because the real shape limits the tight OBB fit.
-                        verts_3d = get_hierarchy_vertices(obj)
-                        if not verts_3d:
-                            if not is_empty_background:
-                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) NO VERTICES | children={len(obj.children)}")
-                            continue
-                        else:
-                            if not is_empty_background:
-                                print(f"  📝 Piece {obj.name} ({obj.get('ldraw_id')}) has {len(verts_3d)} verts from {len(obj.children)} immediate children")
-                    
-                        # Project vertices to 2D
-                        coords_2d = [world_to_camera_view(scene, camera, coord) for coord in verts_3d]
-                        
-                        # Filter visible coords and clamp to 0-1 bounds
-                        visible_points = []
-                        for c in coords_2d:
-                            if c.z > 0: # In front of camera
-                                cx, cy = max(0.0, min(1.0, c.x)), max(0.0, min(1.0, c.y))
-                                visible_points.append((cx, cy))
-                                
-                        if not visible_points: 
-                            if not is_empty_background:
-                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) NOT VISIBLE at Z={obj.location.z:.4f}")
-                            continue
-                        
-                        # Calculate Convex Hull for Instance Segmentation (Polygon Mask)
-                        hull = get_convex_hull(visible_points)
-                        
-                        if not hull or len(hull) < 3:
-                            if not is_empty_background:
-                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) INVALID HULL (len={len(hull) if hull else 0})")
-                            continue
-                        
-                        # Check area size to filter microscopic noise
-                        xs = [p[0] for p in hull]
-                        ys = [p[1] for p in hull]
-                        if (max(xs) - min(xs)) < 0.002 or (max(ys) - min(ys)) < 0.002:
-                            if not is_empty_background:
-                                print(f"  👻 Piece {obj.name} ({obj.get('ldraw_id')}) TOO SMALL (size={(max(xs)-min(xs)):.4f}x{(max(ys)-min(ys)):.4f}) at Z={obj.location.z:.4f}")
-                            continue
-                            
-                        # Write YOLO Segmentation format (class x1 y1 x2 y2 ... xn yn)
-                        if 'class_id' in obj:
-                            # Note: Blender Y goes up, YOLO Y goes down. We invert Y.
-                            # YOLO-Seg expects a continuous sequence of normalized polygon points
-                            pts = []
-                            for corner in hull:
-                                px = max(0.0, min(1.0, corner[0]))
-                                py = max(0.0, min(1.0, 1.0 - corner[1])) # Invert Y for YOLO
-                                pts.extend([f"{px:.6f}", f"{py:.6f}"])
-                                
-                            lf.write(f"{obj['class_id']} {' '.join(pts)}\n")
-                            if not is_empty_background:
-                                print(f"  ✅ Labeled {obj.name} ({obj.get('ldraw_id')}) at Z={obj.location.z:.4f}")
-                            # Track which real part ID, color and color_name is in this image
+                    for obj in active_pieces:
+                        seg_line = generate_yolo_seg_label(obj, scene)
+                        if seg_line:
+                            lf.write(seg_line + "\n")
+                            print(f"  ✅ Labeled {obj.name} ({obj.get('ldraw_id')}) at Z={obj.location.z:.4f}")
                             active_ids_in_image.append(obj.get('ldraw_id', 'unknown'))
                             active_colors_in_image.append(obj.get('color_id_lego', -1))
                     
-                        # Log real IDs + colors for this image to image_meta.jsonl
-                        active_color_names = [
-                            obj.get('color_name_lego', '') for obj in active_pieces
-                            if 'class_id' in obj and not obj.hide_render
-                        ]
-                        with open(meta_path, 'a') as mf:
-                            mf.write(json.dumps({
-                                "img": f"{img_prefix}.jpg", 
-                                "ids": active_ids_in_image,
-                                "color_ids": active_colors_in_image,
-                                "color_names": active_color_names
-                            }) + "\n")
+                    # Write metadata for this image
+                    active_color_names = [
+                        obj.get('color_name_lego', '') for obj in active_pieces
+                        if 'class_id' in obj and not obj.hide_render
+                    ]
+                    write_image_meta(meta_path, img_prefix, active_ids_in_image, active_colors_in_image, active_color_names)
                 else:
-                    # It's an empty background. Still write to metadata so it's not orphaned.
-                    with open(meta_path, 'a') as mf:
-                        mf.write(json.dumps({
-                            "img": f"{img_prefix}.jpg", 
-                            "ids": [],
-                            "color_ids": [],
-                            "color_names": []
-                        }) + "\n")
+                    # Empty background negative sample
+                    write_image_meta(meta_path, img_prefix, [], [], [])
             
             # Restore Z position if it was a negative sample
             if is_empty_background:
@@ -1844,17 +1993,12 @@ def main():
                 bpy.context.view_layer.update()
 
         # CLEANUP: Delete the dynamically spawned pieces for this drop
-        def select_hierarchy(o):
-            o.select_set(True)
-            for c in o.children:
-                select_hierarchy(c)
-                
         bpy.ops.object.select_all(action='DESELECT')
         for obj in active_pieces:
             if obj.name in bpy.data.objects:
                 select_hierarchy(obj)
-        bpy.ops.object.delete()    # Note: data.yaml is now generated by the calling logic (generator.py) 
-    # to correctly handle merged datasets across multiple workers.
+        bpy.ops.object.delete()
+
     print("Blender script finished.")
 
 if __name__ == "__main__":

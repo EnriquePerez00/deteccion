@@ -68,7 +68,7 @@ class ModelTrainer:
         # Let's use the internal logic: best.pt is in project_name/weights/
         best_pt_path = os.path.join(self.model_dir, project_name, "weights", "best.pt")
         
-        target_name = f"detector_set_{set_id}_{timestamp}.pt"
+        target_name = f"yolo_model_{timestamp}.pt"
         target_path = os.path.join(self.model_dir, target_name)
         
         if os.path.exists(best_pt_path):
@@ -81,8 +81,8 @@ class ModelTrainer:
         return results
 
     def get_model_path(self, set_id):
-        # Look for the latest timestamped model for this set
-        pattern = os.path.join(self.model_dir, f"detector_set_{set_id}_*.pt")
+        # Look for the latest timestamped model
+        pattern = os.path.join(self.model_dir, "yolo_model_*.pt")
         models = glob.glob(pattern)
         if models:
             # Sort by name (which includes timestamp) to get the latest

@@ -32,15 +32,19 @@ try:
 except ImportError:
     DYNAMIC_WORKERS = False
 
+# Automatic Indexing Hook
+from run_incremental_indexing import run_full_indexing
+
 # --- CONFIGURATION ---
 PROJECT_ROOT = Path(os.path.abspath(os.path.dirname(__file__)))
 RENDER_LOCAL_DIR = PROJECT_ROOT / "render_local"
 MANAGER_LOG = str(RENDER_LOCAL_DIR / "logs" / "worker_manager.log")
 
 # Paths
-LDRAW_PATH = PROJECT_ROOT / "assets" / "ldraw"
+ASSETS_DIR = PROJECT_ROOT / "assets"
+LDRAW_PATH = ASSETS_DIR / "ldraw"
 ADDON_PATH = PROJECT_ROOT / "src" / "blender_scripts"
-SCENE_SETUP_PY = PROJECT_ROOT / "src" / "blender_scripts" / "scene_setup.py"
+SCENE_SETUP_PY = ADDON_PATH / "scene_setup.py"
 # Default path for Blender on macOS
 BLENDER_PATH = "/Applications/Blender.app/Contents/MacOS/Blender"
 
@@ -169,10 +173,11 @@ def run_render_worker(worker_id, piece_id, chunks_for_worker, render_mode='image
     return worker_id
 
 
-def start_progress_reporter(total_imgs, render_mode, piece_ids=None):
+def start_progress_reporter(total_imgs, render_mode, piece_dir_keys=None):
     """
     Starts a background thread that polls the disk for new images
     and prints progress lines for the UI to parse.
+    piece_dir_keys: optional list of directory names to filter (e.g. ['4073_6', '4073_47'])
     """
     stop_event = threading.Event()
 
@@ -183,13 +188,14 @@ def start_progress_reporter(total_imgs, render_mode, piece_ids=None):
             if render_mode == 'ref_pieza':
                 ref_base = RENDER_LOCAL_DIR / "ref_pieza"
                 if ref_base.exists():
-                    # If we have specific piece_ids, we can be more targeted, 
-                    # but scanning the whole ref_pieza dir is safer for progress
                     for p_dir in ref_base.iterdir():
-                        if p_dir.is_dir():
-                            img_dir = p_dir / "images"
-                            if img_dir.exists():
-                                curr_imgs += len(list(img_dir.glob("*.jpg")))
+                        if not p_dir.is_dir(): continue
+                        # If we have specific dir keys, only count those
+                        if piece_dir_keys and p_dir.name not in piece_dir_keys:
+                            continue
+                        img_dir = p_dir / "images"
+                        if img_dir.exists():
+                            curr_imgs += len(list(img_dir.glob("*.jpg")))
             elif render_mode == 'images_mix':
                 mix_dir = RENDER_LOCAL_DIR / "images_mix" / "images"
                 if mix_dir.exists():
@@ -236,10 +242,8 @@ def filter_minifig_parts(parts):
 
 def main(target_parts, render_settings=None):
     start_time = time.time()
-    
-    render_mode = 'images_mix'  # Default
-    if render_settings:
-        render_mode = render_settings.get('render_mode', 'images_mix')
+    num_cores = multiprocessing.cpu_count()
+    render_mode = render_settings.get('render_mode', 'images_mix') if render_settings else 'images_mix'
     
     # 1. Resolve parts and split minifigs
     from src.logic.resolve_minifig import MinifigResolver
@@ -268,10 +272,10 @@ def main(target_parts, render_settings=None):
                 p_id = str(p_entry)
                 c_id = 15
                 c_name = 'White'
-                
-            out_base = RENDER_LOCAL_DIR / "ref_pieza" / p_id
-            # Clean base for new analyze pass if needed?
-            # Normally we just overwrite analysis_cfg.
+            
+            # Use p_id_colorId as directory to separate same piece with different colors
+            dir_key = f"{p_id}_{c_id}"
+            out_base = RENDER_LOCAL_DIR / "ref_pieza" / dir_key
             config_path = out_base / "meta" / "analysis_cfg.json"
             config_path.parent.mkdir(parents=True, exist_ok=True)
             
@@ -281,10 +285,12 @@ def main(target_parts, render_settings=None):
                     'render_mode': 'ref_pieza',
                     'ref_num_images': 1,
                     'is_analyze_only': True,
-                    'output_base': str(out_base)
+                    'output_base': str(out_base),
+                    'assets_dir': str(ASSETS_DIR),
+                    'ldraw_path': str(LDRAW_PATH),
+                    'addon_path': str(ADDON_PATH)
                 }, f)
             
-            # config_path MUST be the first argument after '--' for the current script's parser
             cmd = [BLENDER_PATH, "--background", "--python", str(SCENE_SETUP_PY), "--", str(config_path)]
             
             try:
@@ -293,10 +299,9 @@ def main(target_parts, render_settings=None):
                 if res_file.exists():
                     with open(res_file, 'r') as f:
                         data = json.load(f)
-                        return p_id, data.get('orientations', [])
+                        return dir_key, data.get('orientations', [])
             except: pass
-            return p_id, []
-
+            return dir_key, []
         part_orientations = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
             anal_results = list(executor.map(run_analysis_one, all_parts))
@@ -311,15 +316,19 @@ def main(target_parts, render_settings=None):
             if isinstance(p_entry, dict):
                 p_id = p_entry.get('part_id', p_entry.get('ldraw_id', str(p_entry)))
                 color_id = p_entry.get('color_id', 15)
+                color_name = p_entry.get('color_name', 'White')
             else:
                 p_id = str(p_entry)
                 color_id = 15
-                
+                color_name = 'White'
+            
+            dir_key = f"{p_id}_{color_id}"
+            oris = part_orientations.get(dir_key, [])
             if not oris:
                 # Fallback to random physics (previous behavior)
                 num_to_render = render_settings.get('ref_num_images', 300) if render_settings else 300
                 piece_cfg = [{
-                    'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': 'White'},
+                    'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': color_name},
                     'tier': 'REF',
                     'imgs': num_to_render,
                     'engine': 'CYCLES',
@@ -328,14 +337,14 @@ def main(target_parts, render_settings=None):
                     'ref_num_images': num_to_render,
                     'offset_idx': 0
                 }]
-                ref_jobs.append((f"{i}_rand", p_id, piece_cfg, 'ref_pieza'))
+                ref_jobs.append((f"{i}_rand", dir_key, piece_cfg, 'ref_pieza'))
                 total_imgs += num_to_render
-                print(f"⚠️  {p_id}: No stable faces found. Falling back to {num_to_render} random drops.")
+                print(f"⚠️  {p_id} (color {color_id}): No stable faces found. Falling back to {num_to_render} random drops.")
             else:
                 # 24 images per stable face (15 degree rotations)
                 for f_idx in range(len(oris)):
                     piece_cfg = [{
-                        'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': 'White'},
+                        'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': color_name},
                         'tier': 'REF',
                         'imgs': 24,
                         'engine': 'CYCLES',
@@ -345,20 +354,23 @@ def main(target_parts, render_settings=None):
                         'ref_num_images': 24,
                         'offset_idx': f_idx * 24
                     }]
-                    ref_jobs.append((f"{i}_{f_idx}", p_id, piece_cfg, 'ref_pieza'))
+                    ref_jobs.append((f"{i}_{f_idx}", dir_key, piece_cfg, 'ref_pieza'))
                     total_imgs += 24
-                print(f"✅ {p_id}: {len(oris)} stable faces detected. Plan: {len(oris) * 24} rotational views.")
+                print(f"✅ {p_id} (color {color_id}): {len(oris)} stable faces detected. Plan: {len(oris) * 24} rotational views.")
 
         print(f"📊 Total Render Plan: {total_imgs} images distributed across {len(ref_jobs)} specialized jobs.")
         
+        # Collect unique directory keys for progress filtering
+        active_dir_keys = list(set(job[1] for job in ref_jobs))
         (RENDER_LOCAL_DIR / "logs").mkdir(parents=True, exist_ok=True)
-        stop_reporter, reporter_thread = start_progress_reporter(total_imgs, 'ref_pieza')
+        stop_reporter, reporter_thread = start_progress_reporter(total_imgs, 'ref_pieza', piece_dir_keys=active_dir_keys)
         
         try:
-            # More conservative worker count for M4 Pro to leave room for macOS UI/Thermal management
-            num_cores = multiprocessing.cpu_count()
-            # Default to cores - 2 for interactive headroom, min 4
-            max_workers = max(4, num_cores - 2)
+            # Default to cores (multi-process scale)
+            max_workers = num_cores
+            # Cap to a safe limit to prevent RAM panic causing aggressive throttle down
+            # M4 Pro has 12 cores, 10 workers is a conservative but stable sweet spot.
+            max_workers = min(max_workers, 10)
             
             # Support manual override or 'low_impact' mode
             if render_settings:
@@ -420,6 +432,10 @@ def main(target_parts, render_settings=None):
                 # GPU-bounded, needs more breathing room
                 max_workers = max(1, num_cores // (3 if low_impact else 2))
                 print(f"🚀 M4 Standard Parallelism (High-Res Mix): {max_workers} clusters active.")
+            
+            # Cap the baseline worker count to prevent CPU/RAM panic oscillations
+            # Upgraded for M4 Pro: 10 workers for stable parallel mix jobs
+            max_workers = min(max_workers, 10)
             
             if render_settings and render_settings.get('max_workers'):
                 max_workers = render_settings['max_workers']
@@ -539,14 +555,12 @@ def main(target_parts, render_settings=None):
         
         # Determine directories to filter based on mode
         filter_dirs = []
-        if render_mode == 'ref_pieza':
-            ref_base = RENDER_LOCAL_DIR / "ref_pieza"
-            if ref_base.exists():
-                filter_dirs = [d for d in ref_base.iterdir() if d.is_dir() and not d.name.startswith('.')]
-        elif render_mode == 'images_mix':
+        if render_mode == 'images_mix':
             mix_dir = RENDER_LOCAL_DIR / "images_mix"
             if mix_dir.exists():
                 filter_dirs = [mix_dir]
+        else:
+            print("  ⏭️ Skipping similarity filter for ref_pieza to preserve identical views/colors.")
         
         for piece_dir in filter_dirs:
             images_dir = piece_dir / "images"
@@ -584,6 +598,7 @@ def main(target_parts, render_settings=None):
             if deleted_in_piece > 0:
                 print(f"  🗑️ {piece_dir.name}: removed {deleted_in_piece} near-duplicates")
                 total_deleted += deleted_in_piece
+
     except ImportError:
         print("  ⚠️ FeatureExtractor not available. Skipping similarity filter.")
     
@@ -697,6 +712,36 @@ def main(target_parts, render_settings=None):
         json.dump(manifest, f, indent=2)
     print(f"📋 Manifest: {manifest_path}")
     
+    # 4d. Tiling Strategy for Training
+    tiling_cfg = render_settings.get('tiling', {})
+    if tiling_cfg.get('enabled', False):
+        print("\n🧩 Tiling Strategy: Fragmenting images for better YOLO accuracy...")
+        tiling_size = tiling_cfg.get('size', 640)
+        tiling_overlap = tiling_cfg.get('overlap', 0.25)
+        
+        tiled_dir = RENDER_LOCAL_DIR / "images_mix_tiled"
+        try:
+            from src.utils.dataset_tiler import process_dataset
+            process_dataset(
+                input_dir=str(mix_dir.parent), 
+                output_dir=str(tiled_dir),
+                slice_size=tiling_size,
+                overlap_ratio=tiling_overlap
+            )
+            
+            # Create data.yaml for tiled set
+            with open(tiled_dir / "data.yaml", 'w') as f:
+                f.write(f"path: .\ntrain: images\nval: images\nnc: 1\nnames: ['lego']\n")
+                
+            piece_manifest.append({
+                "piece_id": "images_mix_tiled",
+                "mode": "tiled",
+                "images": len(list((tiled_dir / "images").glob("*.jpg"))),
+                "data_yaml": "images_mix_tiled/data.yaml",
+            })
+        except Exception as e:
+            print(f"  ❌ Tiling failed: {e}")
+
     # 5. ZIP for Lightning AI / Kaggle
     if not render_settings.get('skip_zip', False):
         ts = datetime.now().strftime("%Y%m%d_%H%M")
@@ -712,6 +757,9 @@ def main(target_parts, render_settings=None):
                     # EXCLUSION: Skip loose pieces (ref_pieza) for training ZIP
                     if "ref_pieza" in file.parts or "ref_pieza" in str(file):
                         continue
+                    
+                    # OPTIONAL: If tiling is enabled, we could skip original images_mix to save space,
+                    # but for now we include both for comparison.
                         
                     arcname = Path("render_local") / file.relative_to(RENDER_LOCAL_DIR)
                     zipf.write(file, arcname=arcname)
@@ -763,6 +811,15 @@ def main(target_parts, render_settings=None):
     print(f"📊 Contents: {total_images} images across {len(piece_manifest)} pieces")
     print(f"⏱️ Total pipeline time: {duration/60:.1f} min")
 
+    # 6. Automatic Vector Indexing
+    if render_mode in ('ref_pieza', 'both') and not render_settings.get('skip_indexing', False):
+        print("\n🧠 PHASE 2: Automatic Vector Indexing...")
+        try:
+            run_full_indexing()
+            print("✅ Vectors updated successfully.")
+        except Exception as e:
+            print(f"❌ Indexing failed: {e}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -771,13 +828,16 @@ if __name__ == "__main__":
 
     # Get pieces from config_train.json if exists, else defaults
     parts = []
-    render_settings = {'skip_zip': args.no_zip}
+    render_settings = {}
     config_path = PROJECT_ROOT / "config_train.json"
     if config_path.exists():
         with open(config_path, 'r') as f:
             data = json.load(f)
             parts = data.get('target_parts', [])
             render_settings = data.get('render_settings', {})
+    
+    # Preserve CLI flag (not overwritten by config)
+    render_settings['skip_zip'] = args.no_zip
             
     if not parts:
         parts = ["3022", "32054", "3795", "4073"]

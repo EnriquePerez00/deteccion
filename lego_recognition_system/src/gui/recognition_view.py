@@ -35,6 +35,9 @@ def load_models(models_dir):
         "index_ok": False,
         "errors": []
     }
+    
+    # Check if a specific model was requested in session_state
+    target_yolo = st.session_state.get("selected_yolo_model")
 
     if YOLO is None:
         status["errors"].append("El paquete `ultralytics` no está instalado.")
@@ -49,7 +52,10 @@ def load_models(models_dir):
     if os.path.exists(yolo_dir):
         pt_files = sorted([f for f in os.listdir(yolo_dir) if f.endswith(".pt")], reverse=True)
         if pt_files:
-            yolo_path = os.path.join(yolo_dir, pt_files[0])
+            if target_yolo and target_yolo in pt_files:
+                yolo_path = os.path.join(yolo_dir, target_yolo)
+            else:
+                yolo_path = os.path.join(yolo_dir, pt_files[0])
 
     if yolo_path and os.path.exists(yolo_path):
         try:
@@ -112,6 +118,30 @@ def render_sidebar_model_status():
             st.rerun()
             
         st.markdown("---")
+        # YOLO Model Selection
+        yolo_dir = os.path.join(st.session_state.get("models_dir", "models"), "yolo_model")
+        if os.path.exists(yolo_dir):
+            pt_files = sorted([f for f in os.listdir(yolo_dir) if f.endswith(".pt")], reverse=True)
+            if pt_files:
+                current_sel = st.session_state.get("selected_yolo_model", pt_files[0])
+                if current_sel not in pt_files: current_sel = pt_files[0]
+                
+                new_yolo = st.selectbox(
+                    "🧠 Modelo YOLO",
+                    options=pt_files,
+                    index=pt_files.index(current_sel),
+                    help="Selecciona el modelo de detección a usar."
+                )
+                if new_yolo != st.session_state.get("selected_yolo_model"):
+                    st.session_state["selected_yolo_model"] = new_yolo
+                    st.cache_resource.clear() # Force reload
+                    st.rerun()
+            else:
+                st.error("❌ No se encontraron modelos .pt")
+        else:
+            st.error("❌ Directorio YOLO no encontrado")
+
+        st.markdown("---")
         st.markdown("**Estado del Sistema:**")
         
         if not s:
@@ -119,12 +149,12 @@ def render_sidebar_model_status():
             return
 
         if s["yolo_ok"]:
-            st.success(f"🧠 YOLO: `{s['yolo_name']}`")
+            st.success(f"✅ YOLO Activo: `{s['yolo_name']}`")
         else:
-            st.error("❌ Detector YOLO no encontrado")
+            st.error("❌ Detector YOLO no cargado")
 
         if s["index_ok"]:
-            st.success(f"📚 {s['index_count']} vectores cargados")
+            st.success(f"📚 {s['index_count']} #vectores disponibles")
         else:
             st.error("❌ Índice vectorial no encontrado")
 
@@ -275,33 +305,57 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
             st.bar_chart({"conf": confs_arr})
 
     if num_detections == 0:
-        st.warning(f"⚠️ No se detectaron piezas LEGO con confianza ≥ {conf_threshold:.0%}.")
-        st.image(image, caption="Imagen original (sin detecciones)", use_container_width=True)
-        return
-
-    # Build scaled_boxes, scaled_polygons, confidences from SAHI results
-    # (coordinates are already in original image space)
-    scaled_boxes = [d['box'] for d in final_detections]
-    confidences = np.array([d['conf'] for d in final_detections])
-
-    has_any_polygon = any(d['polygon'] is not None for d in final_detections)
-    use_masks = has_any_polygon
-    if has_any_polygon:
-        scaled_polygons = [d['polygon'] if d['polygon'] is not None else np.array([]) for d in final_detections]
-    else:
+        st.warning(f"⚠️ YOLO no detectó piezas con confianza ≥ {conf_threshold:.0%}.")
+        st.info("🔄 Activando **Full-Frame Fallback**: Analizando la imagen completa mediante similitud vectorial.")
+        
+        # Create a synthetic detection for the entire image
+        fallback_detection = {
+            'box': np.array([0, 0, orig_w, orig_h]),
+            'conf': 1.0, # Synthetic confidence
+            'polygon': None,
+            'is_fallback': True
+        }
+        final_detections = [fallback_detection]
+        num_detections = 1
+        
+        # For visualization
+        scaled_boxes = [fallback_detection['box']]
+        confidences = np.array([fallback_detection['conf']])
+        has_any_polygon = False
+        use_masks = False
         scaled_polygons = None
+        
+        # Provide a visual cue that it's a fallback
+        annotated = image.copy()
+        draw = ImageDraw.Draw(annotated)
+        draw.rectangle([0, 0, orig_w-1, orig_h-1], outline="red", width=10)
+        draw.text((10, 10), "FULL-FRAME FALLBACK", fill="red")
+        
+    else:
+        # Build scaled_boxes, scaled_polygons, confidences from SAHI results
+        # (coordinates are already in original image space)
+        scaled_boxes = [d['box'] for d in final_detections]
+        confidences = np.array([d['conf'] for d in final_detections])
 
-    # Draw annotations on top of high-res image
-    annotated = _draw_annotations(image, scaled_boxes, scaled_polygons, confidences, use_masks)
+        has_any_polygon = any(d['polygon'] is not None for d in final_detections)
+        use_masks = has_any_polygon
+        if has_any_polygon:
+            scaled_polygons = [d['polygon'] if d['polygon'] is not None else np.array([]) for d in final_detections]
+        else:
+            scaled_polygons = None
+
+        # Draw annotations on top of high-res image
+        annotated = _draw_annotations(image, scaled_boxes, scaled_polygons, confidences, use_masks)
 
     # Original and annotated image side by side
     col_orig, col_annotated = st.columns(2)
     with col_orig:
         st.image(image, caption="📸 Imagen Original", use_container_width=True)
     with col_annotated:
+        caption = "🔍 Detección YOLO" if not (num_detections == 1 and 'Fallback' in annotated.__repr__()) else "🔄 Full-Frame Fallback"
         st.image(
             annotated,
-            caption=f"🔍 Detección YOLO ({num_detections} piezas)",
+            caption=f"{caption} ({num_detections} piezas)",
             use_container_width=True
         )
 
@@ -321,29 +375,35 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
     for d in final_detections:
         detections_input.append({
             'box': d['box'],
-            'polygon': d['polygon']
+            'polygon': d['polygon'],
+            'is_fallback': d.get('is_fallback', False)
         })
 
     # Execute Golden Crop extraction (Standardized 384x384)
-    # We pass the full original image and our SAHI detections
+    # Returns [(raw_crop_pil, masked_crop_pil), ...]
     golden_crops = golden_extractor.process_detections(np.array(image), detections_input)
 
-    for i, cropped_img in enumerate(golden_crops):
+    for i, (raw_img, masked_img) in enumerate(golden_crops):
         conf_val = final_detections[i]['conf']
 
         with st.expander(f"🧩 PASO {i+1}: Identificando pieza (YOLO Conf: {conf_val:.0%})", expanded=True):
-            col_crop, col_ref, col_details = st.columns([1.2, 1.2, 2.1])
+            col_crop1, col_crop2, col_ref, col_details = st.columns([1.0, 1.0, 1.0, 1.8])
 
-            with col_crop:
-                st.markdown("**📸 Recorte Real (YOLO)**")
-                # Add a border-like container using streamlit components if possible, 
-                # but standard st.image is fine for a clean look
-                st.image(cropped_img, use_container_width=True)
-                st.caption(f"Dim: {cropped_img.width}x{cropped_img.height}")
+            with col_crop1:
+                st.markdown("**📸 YOLO Box**")
+                if raw_img:
+                    st.image(raw_img, use_container_width=True)
+                else:
+                    st.warning("Recorte original no disponible")
 
-            # Extract features and search
-            with st.spinner(f"Extrayendo vectores para pieza #{i+1}..."):
-                embedding = extractor.get_embedding(cropped_img)
+            with col_crop2:
+                st.markdown("**✂️ GrabCut Mask**")
+                st.image(masked_img, use_container_width=True)
+                st.caption(f"Dim: {masked_img.width}x{masked_img.height}")
+
+            # Extract features and search USING THE MASKED IMAGE
+            with st.spinner(f"Extrayendo vectores (Masked) para pieza #{i+1}..."):
+                embedding = extractor.get_embedding(masked_img)
 
             if not no_index:
                 # Safety check for cached instances
@@ -361,17 +421,24 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
 
                     with col_ref:
                         st.markdown("**🎨 Referencia 3D (Top #1)**")
-                        if top_sim >= similarity_threshold:
-                            stock_img = fetch_lego_image(top_id)
-                            if stock_img:
-                                st.image(stock_img, use_container_width=True)
+                        
+                        # Fetch stock image regardless of threshold to allow visual verification
+                        stock_img = fetch_lego_image(top_id)
+                        
+                        if stock_img:
+                            st.image(stock_img, use_container_width=True)
+                            
+                            if top_sim >= similarity_threshold:
                                 st.success(f"ID: **{top_id}**")
                             else:
-                                st.warning(f"ID: **{top_id}**")
-                                st.info("Imagen 3D no encontrada en Rebrickable")
+                                st.warning(f"⚠️ Pieza Dudosa (ID: {top_id})")
+                                st.caption(f"Similitud ({top_sim:.1%}) < Umbral ({similarity_threshold:.1%})")
                         else:
-                            st.error("⚠️ Pieza Dudosa / Desconocida")
-                            st.caption(f"La similitud ({top_sim:.1%}) es menor al umbral ({similarity_threshold:.1%})")
+                            if top_sim >= similarity_threshold:
+                                st.success(f"ID: **{top_id}**")
+                            else:
+                                st.error("⚠️ Pieza Dudosa / Desconocida")
+                            st.info("Imagen 3D no encontrada en Rebrickable")
 
                     with col_details:
                         st.markdown("**🏆 Top 3 Candidatos**")

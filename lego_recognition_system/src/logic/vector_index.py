@@ -143,9 +143,12 @@ class VectorIndex:
             return False
 
     def get_indexed_ids(self):
-        """Returns a set of all unique ldraw_ids currently in the index."""
-        indexed_ids = set()
+        """Returns a set of all (ldraw_id, color_id) currently in the index."""
+        indexed_pairs = set()
         for m in self.metadata:
-            if isinstance(m, dict) and 'ldraw_id' in m:
-                indexed_ids.add(m['ldraw_id'])
-        return indexed_ids
+            if isinstance(m, dict):
+                ld_id = m.get('ldraw_id')
+                c_id = m.get('color_id', -1)
+                if ld_id:
+                    indexed_pairs.add((ld_id, c_id))
+        return indexed_pairs
