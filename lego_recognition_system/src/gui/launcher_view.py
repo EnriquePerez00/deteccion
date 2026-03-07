@@ -67,33 +67,9 @@ def render_launcher_ui(project_root):
             target_id = st.text_input("Listado de Minifigs (separado por ,):", key="minifig_id_input")
             num_parts = len([x.strip() for x in target_id.split(",") if x.strip()])
 
-    # --- Color selector per piece (only for manual list mode) ---
+    # --- Color selector per piece (SUPPRESSED: Color-neutral mode) ---
     piece_color_map = {}  # pid -> {color_id, color_name}
-    if mode == "Listado de piezas (separado por ,)" and target_id:
-        raw_piece_ids = [x.strip() for x in target_id.split(",") if x.strip()]
-        if raw_piece_ids:
-            st.markdown("**🎨 Color por pieza:**")
-            color_options = {v["name"]: k for k, v in LEGO_COLORS.items()}
-            color_names_list = list(color_options.keys())
-            
-            # Pre-set session state defaults to "White" for any missing color keys
-            # This avoids the selectbox defaulting to index 0 ("Black")
-            for ci, pid in enumerate(raw_piece_ids):
-                sk = f"color_select_{pid}_{ci}"
-                if sk not in st.session_state:
-                    st.session_state[sk] = "White"
-            
-            cols_color = st.columns(min(len(raw_piece_ids), 4))
-            for ci, pid in enumerate(raw_piece_ids):
-                col_c = cols_color[ci % len(cols_color)]
-                with col_c:
-                    selected_color_name = st.selectbox(
-                        f"Pieza `{pid}` ({ci+1}):",
-                        color_names_list,
-                        key=f"color_select_{pid}_{ci}"
-                    )
-                    selected_color_id = color_options[selected_color_name]
-                    piece_color_map[ci] = {"color_id": selected_color_id, "color_name": selected_color_name}
+    # Color selection logic removed to focus strictly on shape.
 
     st.divider()
 
@@ -125,8 +101,8 @@ def render_launcher_ui(project_root):
                 "ldraw_id": resolved.get("ldraw_id", rid),
                 "part_num": resolved.get("part_num", rid),
                 "name": resolved.get("name", rid),
-                "color_id": piece_color_map.get(i, {}).get("color_id", 15),
-                "color_name": piece_color_map.get(i, {}).get("color_name", "White"),
+                "color_id": 7, # Default Light Gray
+                "color_name": "Light Gray",
             })
     else:
         detail_parts = [{"ldraw_id": x.strip()} for x in target_id.split(",") if x.strip()]
@@ -144,25 +120,32 @@ def render_launcher_ui(project_root):
                     if p.get('ldraw_id', '').startswith('sw') or p.get('ldraw_id', '').startswith('fig')]
         
         X = len(regular)
+        U = len(set(p.get('ldraw_id') for p in regular))  # Distinct shapes
         
         col_formula, col_summary = st.columns(2)
         
+        from src.utils.render_tiers import calculate_mix_params
+        
+        # Calculate parameters based on backend Tier logic
+        N_tier, K_tier, M_tier = calculate_mix_params(U)
+        
         with col_formula:
-            if render_mode_key in ('images_mix', 'both') and X > 0:
-                mix_ratio = st.slider("Mix ratio (K/X):", 0.3, 0.9, 0.75, 0.05, key="mix_ratio")
-                K = max(1, int(X * mix_ratio))
-                N = min(1000, max(500, (X * 1500) // K))
-                
+            if render_mode_key in ('images_mix', 'both') and U > 0:
                 st.markdown(f"""
                 **🎯 Objetivo de Entrenamiento:**
-                - Imágenes Combinadas (**YOLO26**): **{N}** imgs
-                - Variedad por imagen: **{K}** tipos de pieza
-                - Densidad: **30** piezas físicas/imagen
+                - Imágenes Combinadas (**YOLO26**): **{N_tier}** imgs
+                - Variedad total (**formas únicas**): **{U}** tipos
+                - Variedad por imagen: **{K_tier}** tipos de pieza
+                - Densidad: **{M_tier}** piezas físicas/imagen
                 """)
+                
+                # Update N, K for later use in config/resume logic
+                N = N_tier
+                K = K_tier
+                # Density M_tier is also available
             else:
-                mix_ratio = 0.75
-                K = 0
                 N = 0
+                K = 0
         
         with col_summary:
             # Dynamically calculate ref_count for ref_pieza mode based on stable geometric faces
@@ -202,14 +185,38 @@ def render_launcher_ui(project_root):
                 st.markdown("---")
                 mix_res_choice = st.radio(
                     "🎯 Resolución images_mix (YOLO):",
-                    ["1920x1440 (Alta Calidad)", "640x480 (Rápido)", "640x640 (Cuadrada - Entrenamiento)"],
+                    ["2048x2048 (Recomendado Entrenamiento)", "4096x4096 (Máximo Detalle 50x50)", "1920x1024 (16:9)", "640x640 (Mini)"],
                     index=0,
-                    horizontal=True,
+                    help="Usa resoluciones cuadradas para abarcar los 50x50cm sin distorsiones en los bordes.",
                     key="mix_res_choice_ui"
                 )
-                st.session_state['mix_res_val'] = 1920 if "1920" in mix_res_choice else 640
-                # If 640x640 is selected, we want a square aspect ratio
-                st.session_state['mix_res_square'] = "640x640" in mix_res_choice
+                if "4096" in mix_res_choice:
+                    st.session_state['mix_res_val'] = 4096
+                    st.session_state['mix_res_square'] = True
+                elif "2048" in mix_res_choice:
+                    st.session_state['mix_res_val'] = 2048
+                    st.session_state['mix_res_square'] = True
+                elif "1920" in mix_res_choice:
+                    st.session_state['mix_res_val'] = 1920
+                    st.session_state['mix_res_square'] = False
+                else:
+                    st.session_state['mix_res_val'] = 640
+                    st.session_state['mix_res_square'] = True
+
+            # Resolution Selector for Reference Pipeline
+            if render_mode_key in ('ref_pieza', 'both'):
+                st.markdown("---")
+                ref_res_choice = st.radio(
+                    "🎯 Resolución ref_pieza (Vectores 360):",
+                    ["512x512 (Óptimo nativo FAISS/DINOv2)", "1024x1024 (Alta resolución)"],
+                    index=0,
+                    help="Resolución de las imágenes aisladas generadas para calcular los embeddings de referencia.",
+                    key="ref_res_choice_ui"
+                )
+                if "1024" in ref_res_choice:
+                    st.session_state['ref_res_val'] = 1024
+                else:
+                    st.session_state['ref_res_val'] = 512
         
         # Detailed table
         table_data = []
@@ -223,7 +230,6 @@ def render_launcher_ui(project_root):
             
             row = {
                 "Pieza (LDraw)": display_id,
-                "Color": part.get("color_name", "-"),
                 "Tipo": "Minifig" if is_mf else "Regular",
                 "num imagenes": f"{piece_ref_counts.get(i, '—')}" if render_mode_key in ('ref_pieza', 'both') else "",
                 "images_mix": "Excluida" if is_mf else ("Incluida" if render_mode_key in ('images_mix', 'both') else ""),
@@ -254,9 +260,6 @@ def render_launcher_ui(project_root):
     gen_zip = st.checkbox("📦 Generar paquete ZIP para entrenamiento (Lightning/Kaggle)", value=False, help="Crea un archivo .zip con el dataset y el código fuente. Desactívalo para ahorrar espacio en pruebas locales.")
 
     if st.button("🍎 Iniciar Renderizado Local", type="primary"):
-        # 0. Smart Resume Toggle
-        smart_resume = st.checkbox("🔄 Retomar render incompleto (Smart Resume)", value=True, help="Si se interrumpió el proceso, retoma desde la última imagen generada.")
-
         # 1. Prepare config_train.json
         config_path = os.path.join(project_root, "config_train.json")
         
@@ -301,31 +304,20 @@ def render_launcher_ui(project_root):
                         st.write(f"🗑️ Caché borrada: `images_mix`")
                     except: pass
 
-        if smart_resume and render_mode_key in ("images_mix", "both"):
-            mix_dir = os.path.join(render_base, "images_mix", "images")
-            if os.path.exists(mix_dir):
-                existing_mix = [f for f in os.listdir(mix_dir) if f.lower().endswith('.jpg')]
-                if len(existing_mix) < N:
-                    st.info(f"⏳ **Resume YOLO:** Detectadas {len(existing_mix)}/{N} imágenes de mezcla. Blender completará el resto.")
-                elif len(existing_mix) >= N:
-                    st.success(f"✅ Mezcla YOLO ya completada ({len(existing_mix)} imgs).")
-                    # If we only wanted images_mix and it's done, we might skip later
-            else:
-                st.info("🆕 Iniciando nueva generación de mezcla YOLO.")
+        # Cache check for images_mix is handled by Blender or the task manager logic if needed, 
+        # but we remove the specific Streamlit 'Resume' info blocks here.
 
         for i, p_id in enumerate(all_requested_ids):
             p_id_str = p_id.get("part_id", str(p_id)) if isinstance(p_id, dict) else str(p_id)
-            color_id = p_id.get('color_id', 15) if isinstance(p_id, dict) else 15
-            dir_key = f"{p_id_str}_{color_id}"
+            dir_key = p_id_str
 
             if force_render:
                 # 2. Clear per-piece cache if applicable
                 if render_mode_key in ("ref_pieza", "both"):
                     import shutil
-                    # Use color-aware directory key: {p_id}_{color_id}
+                    # Use simplified directory key: {p_id}
                     for check_dir in [
                         os.path.join(render_base, "ref_pieza", dir_key),
-                        os.path.join(render_base, "ref_pieza", p_id_str),  # legacy
                         os.path.join(render_base, p_id_str),  # legacy
                     ]:
                         if os.path.exists(check_dir):
@@ -353,13 +345,7 @@ def render_launcher_ui(project_root):
                 existing_imgs = [f for f in os.listdir(found_dir) if f.lower().endswith('.jpg')]
                 required = piece_ref_counts.get(i, 300)
                 
-                if smart_resume and len(existing_imgs) < required:
-                    st.info(f"⏳ **Resume:** Pieza {p_id_str} está incompleta ({len(existing_imgs)}/{required} imgs). Borrando parcial y retomando de cero...")
-                    try:
-                        shutil.rmtree(os.path.dirname(found_dir))
-                    except: pass
-                    pending_ids.append(p_id)
-                elif len(existing_imgs) >= required:
+                if len(existing_imgs) >= required:
                     skipped_ids.append(p_id_str)
                 else:
                     pending_ids.append(p_id)
@@ -389,6 +375,7 @@ def render_launcher_ui(project_root):
                 "render_mode": render_mode_key,
                 "mix_ratio": mix_ratio if render_mode_key in ('images_mix', 'both') else 0.75,
                 "res": st.session_state.get('mix_res_val', 1920),
+                "ref_res": st.session_state.get('ref_res_val', 640),
                 "square": st.session_state.get('mix_res_square', False)
             }
             

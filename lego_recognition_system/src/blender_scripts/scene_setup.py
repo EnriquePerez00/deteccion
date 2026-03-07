@@ -1804,28 +1804,58 @@ def main():
     # Total physical drops = num_images // 2
     num_drops = max(1, num_images // 2)
     
+    # ─── Calculate Dynamic Piece Counts Distribution ───
+    drop_piece_counts = []
+    
+    # Calculate exact counts for the distribution
+    count_20_1_to_3 = max(1, int(num_drops * 0.20))
+    count_50_5_to_12 = max(1, int(num_drops * 0.50))
+    count_20_15_to_25 = max(1, int(num_drops * 0.20))
+    count_10_empty = max(1, int(num_drops * 0.10))
+    
+    # Fill actual ranges
+    for _ in range(count_20_1_to_3): drop_piece_counts.append(random.randint(1, 3))
+    for _ in range(count_50_5_to_12): drop_piece_counts.append(random.randint(5, 12))
+    for _ in range(count_20_15_to_25): drop_piece_counts.append(random.randint(15, 25))
+    for _ in range(count_10_empty): drop_piece_counts.append(0)
+    
+    # Adjust list length to match num_drops if rounding caused differences
+    while len(drop_piece_counts) < num_drops:
+        drop_piece_counts.append(random.randint(5, 12))  # Padding with average density
+    drop_piece_counts = drop_piece_counts[:num_drops]
+    
+    # Shuffle so the order is unpredictable
+    random.shuffle(drop_piece_counts)
+    
     for drop_idx in range(num_drops):
         scene.frame_set(1)
         bpy.ops.ptcache.free_bake_all()
         
-        # 🎲 Dynamically spawn pieces from available types to reach PARTS_PER_IMAGE
+        # 🎲 Dynamically spawn pieces for this drop
+        current_parts_count = drop_piece_counts[drop_idx]
         available_templates = unique_meshes
         
         # Variety Logic (D): How many distinct types in this image?
-        # Passed from tiered model in run_local_render.py
-        K = data.get('different_pieces', min(PARTS_PER_IMAGE, max(1, int(len(available_templates) * 0.75))))
-        # Ensure K doesn't exceed available templates
-        K = min(K, len(available_templates))
-            
-        selected_templates = random.sample(available_templates, K)
+        # Based on the calculated parts counts, we ensure K doesn't exceed total current parts
+        if current_parts_count > 0:
+            K = min(current_parts_count, max(1, int(len(available_templates) * 0.75)))
+            # Additionally, ensure K cannot exceed available types
+            K = min(K, len(available_templates))
+            selected_templates = random.sample(available_templates, K)
+        else:
+            K = 0
+            selected_templates = []
         
         active_pieces = []
         selected_class_ids = []
         
-        # Distribute PARTS_PER_IMAGE across the K selected templates
-        # Ensure equitable distribution with remainders
-        base_instances = PARTS_PER_IMAGE // K
-        extra_instances = PARTS_PER_IMAGE % K
+        # Distribute current_parts_count across the K selected templates
+        if K > 0:
+            base_instances = current_parts_count // K
+            extra_instances = current_parts_count % K
+        else:
+            base_instances = 0
+            extra_instances = 0
         
         for i, template in enumerate(selected_templates):
             num_to_spawn = base_instances + (1 if i < extra_instances else 0)
@@ -1838,7 +1868,8 @@ def main():
             selected_class_ids.append(str(class_id))
             
             part_radius = get_max_xy_radius(template_obj)
-            safe_limit = max(0.005, 0.10 - part_radius - 0.003)
+            # Allow pieces to scatter across a 22cm radius to fully utilize the 50x50cm board
+            safe_limit = max(0.005, 0.22 - part_radius - 0.003)
             
             for _ in range(num_to_spawn):
                 new_obj = copy_hierarchy(template_obj)
@@ -1874,7 +1905,7 @@ def main():
         for obj in active_pieces:
             
             # Place at safe height for drop
-            limit = obj.get('safe_limit', 0.08)
+            limit = obj.get('safe_limit', 0.22)
             base_z = random.uniform(0.003, 0.025)
             obj.location = (
                 random.uniform(-limit, limit), 
@@ -1922,14 +1953,15 @@ def main():
             
             setup_lighting()
             setup_world_hdri(assets_dir)
+            # Ground handling
             ground_obj = bpy.data.objects.get("Plane")
             if ground_obj:
                 setup_ground_texture(ground_obj, assets_dir)
             
-            # We will generate "Negative Samples" (empty backgrounds) ~10% of the time.
-            is_empty_background = (random.random() < 0.10)
+            # The background is empty if our dynamic piece count specifically requested 0 pieces
+            is_empty_background = (current_parts_count == 0)
             
-            # If empty background, move pieces out of view
+            # If empty background, ensure nothing accidentally falls into view
             if is_empty_background:
                 for obj in active_pieces: # Only active ones matter
                     obj.hide_render = True

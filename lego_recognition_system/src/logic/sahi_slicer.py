@@ -17,14 +17,14 @@ from PIL import Image
 # ─────────────────────────────────────────────────────────────────────
 # 1. SLICE GENERATOR
 # ─────────────────────────────────────────────────────────────────────
-def generate_slices(image, slice_size=1824, overlap_ratio=0.30):
+def generate_slices(image, slice_size=1024, overlap_ratio=0.20):
     """
     Splits a PIL image into overlapping tiles.
 
     Args:
         image: PIL Image (RGB).
-        slice_size: Tile side in pixels (default 1824 — optimised for 24MP over 50cm).
-        overlap_ratio: Fractional overlap between adjacent tiles (default 0.30).
+        slice_size: Tile side in pixels (default 1024).
+        overlap_ratio: Fractional overlap between adjacent tiles (default 0.20).
 
     Returns:
         List of dicts: [{'tile': PIL.Image, 'x': int, 'y': int, 'w': int, 'h': int}, ...]
@@ -197,7 +197,7 @@ def global_nms(all_detections, iou_threshold=0.5):
 # 4. HIGH-LEVEL PIPELINE
 # ─────────────────────────────────────────────────────────────────────
 def run_sahi_inference(yolo_model, image, conf_threshold=0.25,
-                       slice_size=1824, overlap_ratio=0.30,
+                       slice_size=1024, overlap_ratio=0.20,
                        iou_threshold=0.5, center_bonus=0.05,
                        progress_callback=None):
     """
@@ -222,8 +222,9 @@ def run_sahi_inference(yolo_model, image, conf_threshold=0.25,
     all_detections = []
     for idx, s in enumerate(slices):
         # Run YOLO on tile
+        # We explicitly force the internal YOLO resizer to match our tile size precisely
         results = yolo_model.predict(
-            s['tile'], conf=conf_threshold, agnostic_nms=True, verbose=False
+            s['tile'], conf=conf_threshold, imgsz=1024, agnostic_nms=True, verbose=False
         )
         result = results[0] if results else None
 

@@ -58,13 +58,8 @@ def get_num_colors() -> int:
     return len(LEGO_COLORS)
 
 def get_color_onehot(color_id: int):
-    """Generates a one-hot vector for a given color ID based on sorted color keys."""
+    """DEPRECATED: Returns a zero vector as color is no longer used."""
     import numpy as np
-    sorted_ids = sorted(LEGO_COLORS.keys())
-    vec = np.zeros(len(sorted_ids), dtype=np.float32)
-    if color_id in LEGO_COLORS:
-        idx = sorted_ids.index(color_id)
-        vec[idx] = 1.0
-    return vec
+    return np.zeros(1, dtype=np.float32)
 
 __all__ = ["LEGO_COLORS", "get_color_name", "get_num_colors", "get_color_onehot"]

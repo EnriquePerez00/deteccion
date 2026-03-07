@@ -63,19 +63,6 @@ LEGO_COLORS_HEX = {
 _BLENDER_RGBA_CACHE = {}
 
 def get_blender_rgba(color_id):
-    if color_id in _BLENDER_RGBA_CACHE:
-        return _BLENDER_RGBA_CACHE[color_id]
-    
-    # Check if int or string
-    try:
-        cid = int(color_id)
-    except:
-        return (0.8, 0.8, 0.8, 1.0)
-        
-    if cid in LEGO_COLORS_HEX:
-        rgba = hex_to_rgba(LEGO_COLORS_HEX[cid])
-        _BLENDER_RGBA_CACHE[cid] = rgba
-        return rgba
-    
-    # Fallback default gray
-    return (0.8, 0.8, 0.8, 1.0)
+    """Returns a fixed neutral gray (clay render style) regardless of the color_id."""
+    return (0.5, 0.5, 0.5, 1.0)
+

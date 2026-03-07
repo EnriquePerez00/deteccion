@@ -1,0 +1,35 @@
+{
+    "worker_id": "test_physics_render",
+    "output_base": "test_output_physics_render",
+    "assets_dir": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets",
+    "ldraw_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets/ldraw",
+    "addon_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/blender_scripts",
+    "render_mode": "ref_pieza",
+    "is_analyze_only": false,
+    "resolution_x": 640,
+    "resolution_y": 640,
+    "ref_num_images": 2,
+    "piece_limit": 1,
+    "pieces_config": [
+        {
+            "part": {
+                "ldraw_id": "3001",
+                "color_id": 15,
+                "name": "3001",
+                "color_name": "White"
+            },
+            "tier": "REF",
+            "imgs": 2,
+            "engine": "CYCLES",
+            "res": 640,
+            "stable_face_idx": 0,
+            "orientations": [
+                [
+                    0,
+                    0,
+                    0
+                ]
+            ]
+        }
+    ]
+}

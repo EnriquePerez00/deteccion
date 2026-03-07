@@ -45,6 +45,7 @@ ASSETS_DIR = PROJECT_ROOT / "assets"
 LDRAW_PATH = ASSETS_DIR / "ldraw"
 ADDON_PATH = PROJECT_ROOT / "src" / "blender_scripts"
 SCENE_SETUP_PY = ADDON_PATH / "scene_setup.py"
+SINGLE_PIECE_SETUP_PY = ADDON_PATH / "single_piece_setup.py"
 # Default path for Blender on macOS
 BLENDER_PATH = "/Applications/Blender.app/Contents/MacOS/Blender"
 
@@ -56,35 +57,7 @@ if not os.path.exists(BLENDER_PATH):
         pass
 
 
-def calculate_mix_params(num_unique_pieces, mix_ratio=0.75):
-    """
-    Calculate optimal render parameters based on the Tier Model for N (1-100+).
-    T: Total Images
-    M: Pieces per Image
-    D: Different piece types per image
-    """
-    N = num_unique_pieces
-    
-    if N <= 5:
-        # Tier 1: Micro-Set
-        T, M, D = 650, 8, 2
-    elif N <= 20:
-        # Tier 2: Small-Set
-        T, M, D = 1600, 12, 5
-    elif N <= 50:
-        # Tier 3: Medium-Set
-        T, M, D = 3250, 18, 10
-    elif N <= 100:
-        # Tier 4: Large-Set
-        T, M, D = 5250, 22, 12
-    else:
-        # Tier 5: Ultra-Set
-        T, M, D = 6000, 25, 15
-
-    # Safety: D cannot exceed N
-    D = min(D, N)
-    
-    return T, D, M
+from src.utils.render_tiers import calculate_mix_params
 
 
 def setup_structure(piece_id=None, mode='images_mix'):
@@ -128,15 +101,19 @@ def run_render_worker(worker_id, piece_id, chunks_for_worker, render_mode='image
     
     # Add mode-specific config
     if chunks_for_worker:
-        res_x = chunks_for_worker[0].get('res', 1920)
-        worker_cfg['resolution_x'] = res_x
-        worker_cfg['resolution_y'] = int(res_x * 0.75)
-
-    if render_mode == 'ref_pieza':
-        worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 300)
-    elif render_mode == 'images_mix':
-        worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 250)
-        worker_cfg['parts_per_image'] = chunks_for_worker[0].get('parts_per_image', 20)
+        is_square = chunks_for_worker[0].get('square', False)
+        
+        if render_mode == 'ref_pieza':
+            res_x = chunks_for_worker[0].get('ref_res', 640)
+            worker_cfg['resolution_x'] = res_x
+            worker_cfg['resolution_y'] = res_x
+            worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 300)
+        else:
+            res_x = chunks_for_worker[0].get('res', 1920)
+            worker_cfg['resolution_x'] = res_x
+            worker_cfg['resolution_y'] = res_x if is_square else int(res_x * 0.75)
+            worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 250)
+            worker_cfg['parts_per_image'] = chunks_for_worker[0].get('parts_per_image', 20)
     
     cfg_path = mode_dirs['configs'] / f'render_cfg_{worker_id}.json'
     with open(cfg_path, 'w') as f:
@@ -150,8 +127,10 @@ def run_render_worker(worker_id, piece_id, chunks_for_worker, render_mode='image
     
     print(f"  ↳ [{piece_id} | {render_mode} | Worker {worker_id}] Starting render subprocess...")
     
+    active_script = SINGLE_PIECE_SETUP_PY if render_mode == 'ref_pieza' else SCENE_SETUP_PY
+
     cmd = [
-        'caffeinate', '-i', BLENDER_PATH, '--background', '--python', str(SCENE_SETUP_PY),
+        'caffeinate', '-i', BLENDER_PATH, '--background', '--python', str(active_script),
         '--', str(cfg_path)
     ]
     
@@ -291,7 +270,7 @@ def main(target_parts, render_settings=None):
                     'addon_path': str(ADDON_PATH)
                 }, f)
             
-            cmd = [BLENDER_PATH, "--background", "--python", str(SCENE_SETUP_PY), "--", str(config_path)]
+            cmd = [BLENDER_PATH, "--background", "--python", str(SINGLE_PIECE_SETUP_PY), "--", str(config_path)]
             
             try:
                 subprocess.run(cmd, check=False, timeout=60, capture_output=True)
@@ -332,7 +311,9 @@ def main(target_parts, render_settings=None):
                     'tier': 'REF',
                     'imgs': num_to_render,
                     'engine': 'CYCLES',
-                    'res': 384,
+                    'res': render_settings.get('res', 1920) if render_settings else 1920,
+                    'ref_res': render_settings.get('ref_res', 640) if render_settings else 640,
+                    'square': True,
                     'stable_face_idx': -1,
                     'ref_num_images': num_to_render,
                     'offset_idx': 0
@@ -348,7 +329,9 @@ def main(target_parts, render_settings=None):
                         'tier': 'REF',
                         'imgs': 24,
                         'engine': 'CYCLES',
-                        'res': 384,
+                        'res': render_settings.get('res', 1920) if render_settings else 1920,
+                        'ref_res': render_settings.get('ref_res', 640) if render_settings else 640,
+                        'square': True,
                         'stable_face_idx': f_idx,
                         'orientations': oris,
                         'ref_num_images': 24,
@@ -477,6 +460,7 @@ def main(target_parts, render_settings=None):
                         'imgs': n_imgs,
                         'engine': 'CYCLES',
                         'res': mix_res,
+                        'square': render_settings.get('square', False) if render_settings else True,
                         'parts_per_image': pieces_per_image,
                         'different_pieces': K,  # Tiered variety (D)
                     })

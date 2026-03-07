@@ -13,6 +13,7 @@ Supports the new dual-mode directory structure:
 
 import os
 import sys
+import argparse
 from pathlib import Path
 
 # Add project root to path
@@ -23,19 +24,28 @@ if PROJECT_ROOT not in sys.path:
 from src.logic.build_reference_index import build_index
 
 RENDER_LOCAL = os.path.join(PROJECT_ROOT, "render_local")
-OUTPUT_DIR = os.path.join(PROJECT_ROOT, "models", "piezas_vectores")
+BASE_OUTPUT_DIR = os.path.join(PROJECT_ROOT, "models", "piezas_vectores")
 
 
-def run_full_indexing():
+def run_full_indexing(extractor_weights=None):
     """Scan all piece directories and build/update the unified index."""
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    processed = 0
+    # Determine subdirectory based on weights
+    if extractor_weights:
+        model_slug = os.path.splitext(os.path.basename(extractor_weights))[0]
+    else:
+        model_slug = "base"
     
+    output_dir = os.path.join(BASE_OUTPUT_DIR, model_slug)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    processed = 0
     render_path = Path(RENDER_LOCAL)
     if not render_path.exists():
         print(f"❌ render_local/ not found at {RENDER_LOCAL}")
         return
     
+    print(f"🔍 Model: {model_slug}")
+    print(f"🔍 Output: {output_dir}")
     print(f"🔍 Scanning {RENDER_LOCAL} for piece directories...")
     
     # 1. Collect all directories to process
@@ -50,16 +60,11 @@ def run_full_indexing():
                 if img_count > 0:
                     dirs_to_process.append(piece_dir)
     
-    # Mix directory is NO LONGER processed here because build_reference_index 
-    # assumes perfectly cropped single-piece images.
-    # Processing images_mix would poison the index with full-scene vectors.
-    
     # Process legacy per-piece directories
     for piece_dir in sorted(render_path.iterdir()):
         if not piece_dir.is_dir(): continue
         if piece_dir.name in ('ref_pieza', 'images_mix', '.DS_Store'): continue
         if piece_dir.name.startswith('.'): continue
-        
         if (piece_dir / "images").exists():
             img_count = len(list((piece_dir / "images").glob("*.jpg")))
             if img_count > 0:
@@ -71,13 +76,14 @@ def run_full_indexing():
     # 2. Process each directory
     for i, piece_dir in enumerate(dirs_to_process):
         print(f"PROGRESS: {i+1}/{total_dirs} | Processing {piece_dir.name}...")
-        build_index(str(piece_dir), OUTPUT_DIR, unified=True)
+        # Note: build_index now handles extractor_weights
+        build_index(str(piece_dir), output_dir, unified=True, extractor_weights=extractor_weights)
         processed += 1
     
     print(f"\n✅ Indexación completada: {processed} directorios procesados")
     
     # Check final index
-    index_path = os.path.join(OUTPUT_DIR, "lego.index")
+    index_path = os.path.join(output_dir, "lego.index")
     if os.path.exists(index_path):
         size_mb = os.path.getsize(index_path) / (1024 * 1024)
         print(f"📊 Índice FAISS: {index_path} ({size_mb:.1f} MB)")
@@ -86,5 +92,10 @@ def run_full_indexing():
 
 
 if __name__ == "__main__":
-    print(f"🚀 Iniciando indexación incremental completa...")
-    run_full_indexing()
+    parser = argparse.ArgumentParser()
+    parser.get_default("--weights", None)
+    parser.add_argument("--weights", type=str, help="Path to DINOv2 weights (.pth)")
+    args = parser.parse_args()
+
+    print(f"🚀 Iniciando indexación incremental funcional...")
+    run_full_indexing(extractor_weights=args.weights)

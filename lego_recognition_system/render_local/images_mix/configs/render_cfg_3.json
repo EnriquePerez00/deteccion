@@ -5,435 +5,16 @@
     "pieces_config": [
         {
             "part": {
-                "ldraw_id": "2877",
-                "color_id": 0,
-                "color_name": "Black",
-                "name": "2877"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "30414",
-                "color_id": 0,
-                "color_name": "Black",
-                "name": "30414"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "15391",
-                "color_id": 0,
-                "color_name": "Black",
-                "name": "15391"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "32054",
-                "color_id": 0,
-                "color_name": "Black",
-                "name": "32054"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "61780",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "61780"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "15392",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "15392"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3832",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "3832"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3022",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "3022"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3795",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "3795"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "2654a",
-                "color_id": 72,
-                "color_name": "Dark Bluish Gray",
-                "name": "2654a"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
                 "ldraw_id": "2412b",
                 "color_id": 72,
                 "color_name": "Dark Bluish Gray",
                 "name": "2412b"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3004",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3004"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "2653",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "2653"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "11055",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "11055"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "87552",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "87552"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3710",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3710"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "2445",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "2445"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3795",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3795"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3839b",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3839b"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "85984",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "85984"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3040b",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3040b"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "60481a",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "60481a"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "2449",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "2449"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "6541",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "6541"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "32000",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "32000"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "61184",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "61184"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3068b",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3068b"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "14769",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "14769"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3679",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "3679"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "87620",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "87620"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "51739",
-                "color_id": 71,
-                "color_name": "Light Bluish Gray",
-                "name": "51739"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         },
@@ -445,121 +26,40 @@
                 "name": "2419"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         },
         {
             "part": {
-                "ldraw_id": "3024",
-                "color_id": 4,
-                "color_name": "Red",
-                "name": "3024"
+                "ldraw_id": "2445",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "2445"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         },
         {
             "part": {
-                "ldraw_id": "28653",
-                "color_id": 4,
-                "color_name": "Red",
-                "name": "28653"
+                "ldraw_id": "2449",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "2449"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "28653",
-                "color_id": 40,
-                "color_name": "Trans-Brown",
-                "name": "28653"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "59900",
-                "color_id": 36,
-                "color_name": "Trans-Red",
-                "name": "59900"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "4073",
-                "color_id": 36,
-                "color_name": "Trans-Red",
-                "name": "4073"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3022",
-                "color_id": 15,
-                "color_name": "White",
-                "name": "3022"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "3020",
-                "color_id": 15,
-                "color_name": "White",
-                "name": "3020"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
-            "parts_per_image": 18,
-            "different_pieces": 10
-        },
-        {
-            "part": {
-                "ldraw_id": "4073",
-                "color_id": 15,
-                "color_name": "White",
-                "name": "4073"
-            },
-            "tier": "MIX",
-            "imgs": 541,
-            "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         },
@@ -571,9 +71,175 @@
                 "name": "2540"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "2653",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "2653"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "2654a",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "2654a"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "2877",
+                "color_id": 0,
+                "color_name": "Black",
+                "name": "2877"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3004",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3004"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3020",
+                "color_id": 15,
+                "color_name": "White",
+                "name": "3020"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3022",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "3022"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3022",
+                "color_id": 15,
+                "color_name": "White",
+                "name": "3022"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3024",
+                "color_id": 4,
+                "color_name": "Red",
+                "name": "3024"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3040b",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3040b"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3068b",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3068b"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3679",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3679"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         },
@@ -585,9 +251,385 @@
                 "name": "3680"
             },
             "tier": "MIX",
-            "imgs": 541,
+            "imgs": 166,
             "engine": "CYCLES",
-            "res": 1920,
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3710",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3710"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3795",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "3795"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3795",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3795"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3832",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "3832"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "3839b",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "3839b"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "4073",
+                "color_id": 36,
+                "color_name": "Trans-Red",
+                "name": "4073"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "4073",
+                "color_id": 15,
+                "color_name": "White",
+                "name": "4073"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "6541",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "6541"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "11055",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "11055"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "14769",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "14769"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "15391",
+                "color_id": 0,
+                "color_name": "Black",
+                "name": "15391"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "15392",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "15392"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "28653",
+                "color_id": 4,
+                "color_name": "Red",
+                "name": "28653"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "28653",
+                "color_id": 40,
+                "color_name": "Trans-Brown",
+                "name": "28653"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "30414",
+                "color_id": 0,
+                "color_name": "Black",
+                "name": "30414"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "32000",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "32000"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "32054",
+                "color_id": 0,
+                "color_name": "Black",
+                "name": "32054"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "51739",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "51739"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "59900",
+                "color_id": 36,
+                "color_name": "Trans-Red",
+                "name": "59900"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "60481a",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "60481a"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "61184",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "61184"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "61780",
+                "color_id": 72,
+                "color_name": "Dark Bluish Gray",
+                "name": "61780"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "85984",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "85984"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "87552",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "87552"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
+            "parts_per_image": 18,
+            "different_pieces": 10
+        },
+        {
+            "part": {
+                "ldraw_id": "87620",
+                "color_id": 71,
+                "color_name": "Light Bluish Gray",
+                "name": "87620"
+            },
+            "tier": "MIX",
+            "imgs": 166,
+            "engine": "CYCLES",
+            "res": 2048,
+            "square": true,
             "parts_per_image": 18,
             "different_pieces": 10
         }
@@ -596,8 +638,8 @@
     "assets_dir": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets",
     "ldraw_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/assets/ldraw",
     "addon_path": "/Users/I764690/Code_personal/test_heavy_image_recognition/lego_recognition_system/src/blender_scripts",
-    "resolution_x": 1920,
-    "resolution_y": 1440,
-    "ref_num_images": 541,
+    "resolution_x": 2048,
+    "resolution_y": 2048,
+    "ref_num_images": 166,
     "parts_per_image": 18
 }

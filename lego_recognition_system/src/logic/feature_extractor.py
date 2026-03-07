@@ -18,7 +18,7 @@ os.environ['SSL_CERT_FILE'] = certifi.where()
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
 class FeatureExtractor:
-    def __init__(self, model_name='dinov2_vits14'):
+    def __init__(self, model_name='dinov2_vits14', weights_path=None):
         # Optimize for M4: Priority CUDA -> MPS (Metal) -> CPU
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -47,6 +47,18 @@ class FeatureExtractor:
             self.model = nn.Sequential(*list(base_model.children())[:-1])
             self.feature_dim = 2048
         
+        # Load custom fine-tuned weights if provided
+        if weights_path and os.path.exists(weights_path):
+            try:
+                checkpoint = torch.load(weights_path, map_location='cpu')
+                state_dict = checkpoint.get('state_dict', checkpoint)
+                self.model.load_state_dict(state_dict, strict=True)
+                config = checkpoint.get('config', {})
+                print(f"✅ Loaded fine-tuned weights: {os.path.basename(weights_path)} "
+                      f"(epoch {checkpoint.get('epoch', '?')}, loss {checkpoint.get('loss', '?'):.4f})")
+            except Exception as e:
+                print(f"⚠️ Failed to load custom weights ({e}). Using base model.")
+
         self.model.eval()
         self.model.to(self.device)
         
@@ -72,21 +84,8 @@ class FeatureExtractor:
             
         return features.cpu().numpy().flatten()
 
-    def get_embedding_with_color(self, image, color_id: int = -1):
-        """
-        Get geometry embedding concatenated with color one-hot vector.
-        
-        Returns:
-            np.ndarray of shape (feature_dim + NUM_COLORS,)
-        """
-        from src.logic.lego_colors import get_color_onehot
-        
-        geo_embedding = self.get_embedding(image)
-        color_onehot = get_color_onehot(color_id)
-        
-        return np.concatenate([geo_embedding, color_onehot])
-
     def get_batch_embeddings(self, images):
+
         """Batch processing for speed."""
         processed_images = []
         for img in images:

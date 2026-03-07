@@ -63,14 +63,17 @@ def determine_optimal_k(embeddings, max_k=12, similarity_threshold=0.96):
             
     return best_k, best_centers
 
-def build_index(dataset_dir, output_folder, unified=True, force=False):
+def build_index(dataset_dir, output_folder, unified=True, force=False, extractor_weights=None):
     """
     Builds or updates vector indices incrementally.
+    
+    Args:
+        extractor_weights: Optional path to fine-tuned DINOv2 weights (.pth).
     """
     print(f"🛠️ Building/Updating Reference Indices in {output_folder}...")
     os.makedirs(output_folder, exist_ok=True)
     
-    extractor = FeatureExtractor(model_name='dinov2_vits14')
+    extractor = FeatureExtractor(model_name='dinov2_vits14', weights_path=extractor_weights)
     golden_extractor = GoldenCropExtractor()
     # Perfect-Fit Mode: We bypass GoldenCropExtractor (YOLO) since renders are already standardized
     unified_index = VectorIndex() if unified else None
@@ -125,10 +128,8 @@ def build_index(dataset_dir, output_folder, unified=True, force=False):
         # Get the first piece identity from metadata
         first_img = next(iter(image_meta.values()))
         if first_img['ids']:
-            ldraw_id = first_img['ids'][0]
-            color_id = first_img['color_ids'][0] if first_img['color_ids'] else -1
-            if (ldraw_id, color_id) in indexed_pairs:
-                print(f"   ⏭️  Piece {ldraw_id} (color {color_id}) already in index. Skipping extraction.")
+            if ldraw_id in indexed_pairs:
+                print(f"   ⏭️  Piece {ldraw_id} already in index. Skipping extraction.")
                 return
     # -------------------------------
     
@@ -201,8 +202,8 @@ def build_index(dataset_dir, output_folder, unified=True, force=False):
             piece_data[ldraw_id]['embeddings'].append(embedding)
             piece_data[ldraw_id]['metadata'].append({
                 'ldraw_id': ldraw_id,
-                'color_id': color_id,
-                'color_name': get_color_name(color_id) if color_id >= 0 else 'Unknown'
+                'color_id': 7,
+                'color_name': 'Light Gray'
             })
             
             processed_count += 1
@@ -238,7 +239,7 @@ def build_index(dataset_dir, output_folder, unified=True, force=False):
                 continue
             
             for emb in data['final_embeddings']:
-                unified_index.add(emb, {'ldraw_id': ldraw_id, 'color_id': color_id})
+                unified_index.add(emb, {'ldraw_id': ldraw_id, 'color_id': 7})
                 added_count += 1
         
         if added_count > 0:

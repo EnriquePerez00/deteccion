@@ -68,17 +68,31 @@ def load_models(models_dir):
         status["errors"].append(f"No se encontró modelo YOLO en {yolo_dir}")
 
     # ── FEATURE EXTRACTOR ───────────────────────────────────────────────────────
-    feature_extractor = FeatureExtractor(model_name='dinov2_vits14')
+    dinov2_weights = st.session_state.get("selected_dinov2_weights")
+    feature_extractor = FeatureExtractor(model_name='dinov2_vits14', weights_path=dinov2_weights)
+    status["dinov2_name"] = os.path.basename(dinov2_weights) if dinov2_weights else "dinov2_vits14 (base)"
+    status["dinov2_ok"] = True
 
     # ── VECTOR INDEX ─────────────────────────────────────────────────────────────
     vector_index = VectorIndex()
-    piezas_dir = os.path.join(models_dir, "piezas_vectores")
+    base_piezas_dir = os.path.join(models_dir, "piezas_vectores")
+
+    # Determine model slug for index subdirectory
+    dinov2_sel = st.session_state.get("selected_dinov2_label", "dinov2_vits14 (base)")
+    if "base" in dinov2_sel.lower():
+        model_slug = "base"
+    else:
+        model_slug = os.path.splitext(dinov2_sel)[0]
+
+    piezas_dir = os.path.join(base_piezas_dir, model_slug)
+    
+    # Fallback to legacy root directory if slug dir doesn't exist
+    if not os.path.exists(piezas_dir):
+        piezas_dir = base_piezas_dir
 
     if os.path.exists(piezas_dir):
-        # Prefer lego.index (Strategy C default)
         target_index = os.path.join(piezas_dir, "lego.index")
         if not os.path.exists(target_index):
-            # Fallback to any .index file if lego.index is missing
             index_files = [f for f in os.listdir(piezas_dir) if f.endswith(".index")]
             if index_files:
                 target_index = os.path.join(piezas_dir, index_files[0])
@@ -90,10 +104,11 @@ def load_models(models_dir):
                 if vector_index.load(target_index):
                     status["index_count"] = vector_index.index.ntotal
                     status["index_ok"] = True
+                    status["index_slug"] = model_slug # Track which slug we loaded
             except Exception as e:
                 status["errors"].append(f"Error cargando índice {os.path.basename(target_index)}: {e}")
         else:
-            status["errors"].append(f"No se encontró ningún archivo .index en {piezas_dir}")
+            status["errors"].append(f"No se encontró índice para modelo '{model_slug}' en {piezas_dir}")
     else:
         status["errors"].append(f"Directorio de vectores no existe: {piezas_dir}")
 
@@ -141,6 +156,32 @@ def render_sidebar_model_status():
         else:
             st.error("❌ Directorio YOLO no encontrado")
 
+        # DINOv2 Model Selection
+        dinov2_dir = os.path.join(st.session_state.get("models_dir", "models"), "dinov2_lego")
+        base_option = "dinov2_vits14 (base)"
+        dinov2_options = [base_option]
+        if os.path.exists(dinov2_dir):
+            pth_files = sorted([f for f in os.listdir(dinov2_dir) if f.endswith(".pth")], reverse=True)
+            dinov2_options.extend(pth_files)
+
+        current_dinov2 = st.session_state.get("selected_dinov2_label", base_option)
+        if current_dinov2 not in dinov2_options:
+            current_dinov2 = base_option
+
+        new_dinov2 = st.selectbox(
+            "🔬 Modelo DINOv2",
+            options=dinov2_options,
+            index=dinov2_options.index(current_dinov2),
+            help="Selecciona el modelo de extracción de features."
+        )
+        if new_dinov2 != st.session_state.get("selected_dinov2_label"):
+            st.session_state["selected_dinov2_label"] = new_dinov2
+            if new_dinov2 == base_option:
+                st.session_state["selected_dinov2_weights"] = None
+            st.session_state["selected_dinov2_weights"] = os.path.join(dinov2_dir, new_dinov2)
+            st.cache_resource.clear()
+            st.rerun()
+
         st.markdown("---")
         st.markdown("**Estado del Sistema:**")
         
@@ -149,12 +190,18 @@ def render_sidebar_model_status():
             return
 
         if s["yolo_ok"]:
-            st.success(f"✅ YOLO Activo: `{s['yolo_name']}`")
+            st.success(f"✅ YOLO: `{s['yolo_name']}`")
         else:
             st.error("❌ Detector YOLO no cargado")
 
+        if s.get("dinov2_ok"):
+            st.success(f"🔬 DINOv2: `{s.get('dinov2_name', 'base')}`")
+        else:
+            st.error("❌ DINOv2 no cargado")
+
         if s["index_ok"]:
-            st.success(f"📚 {s['index_count']} #vectores disponibles")
+            slug_tag = f" ({s['index_slug']})" if "index_slug" in s else ""
+            st.success(f"📚 {s['index_count']} #vectores disponibles{slug_tag}")
         else:
             st.error("❌ Índice vectorial no encontrado")
 
@@ -256,6 +303,11 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
 
     try:
         image = Image.open(uploaded_file).convert("RGB")
+        # Pre-scale to 4K max (e.g. 4096x4096) to turbocharge inference
+        # without losing critical features from the original 24MP file
+        image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+        
+        orig_w, orig_h = image.size
     except Exception as e:
         st.error(f"Error cargando imagen: {e}")
         return
@@ -284,8 +336,8 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
         final_detections = run_sahi_inference(
             yolo, image,
             conf_threshold=conf_threshold,
-            slice_size=1824,
-            overlap_ratio=0.30,
+            slice_size=1024,
+            overlap_ratio=0.20,
             iou_threshold=0.5,
             center_bonus=0.05,
             progress_callback=_sahi_progress,
@@ -298,8 +350,8 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
 
     # ── Debug info ───────────────────────────────────────────────────────────
     with st.expander("🔍 Debug — SAHI Info", expanded=(num_detections == 0)):
-        n_tiles = len(generate_slices(image, 1824, 0.30))
-        st.markdown(f"**Imagen:** `{orig_w}×{orig_h}` | **Tiles:** `{n_tiles}` (1824px, 30% overlap)")
+        n_tiles = len(generate_slices(image, 1024, 0.20))
+        st.markdown(f"**Imagen:** `{orig_w}×{orig_h}` | **Tiles:** `{n_tiles}` (1024px, 20% overlap)")
         if final_detections:
             confs_arr = [d['conf'] for d in final_detections]
             st.bar_chart({"conf": confs_arr})
@@ -350,7 +402,7 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
     # Original and annotated image side by side
     col_orig, col_annotated = st.columns(2)
     with col_orig:
-        st.image(image, caption="📸 Imagen Original", use_container_width=True)
+        st.image(image, caption="📸 Imagen redimensionada a ~4K", use_container_width=True)
     with col_annotated:
         caption = "🔍 Detección YOLO" if not (num_detections == 1 and 'Fallback' in annotated.__repr__()) else "🔄 Full-Frame Fallback"
         st.image(
@@ -447,10 +499,8 @@ def render_recognition_ui(uploaded_file, models_dir, conf_threshold, similarity_
                             sim = match['similarity']
 
                             medal = ["🥇", "🥈", "🥉"][rank]
-                            # Dynamic color based on similarity
-                            if sim > 0.85: color = "#2ecc71" # Green
-                            elif sim > 0.6: color = "#f1c40f" # Yellow
-                            else: color = "#e67e22" # Orange
+                            # Use a neutral color (Blue/Teal) instead of dynamic colors
+                            color = "#45B7D1"
                             
                             st.markdown(
                                 f'<div style="background:#2d3436; padding:10px; border-left: 5px solid {color}; border-radius:5px; margin-bottom:8px; color: white;">'

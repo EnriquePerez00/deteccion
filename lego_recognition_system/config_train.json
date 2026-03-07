@@ -1,172 +1,18 @@
 {
-    "session_reference": "75078-1_20260306_0804",
+    "session_reference": "6141_20260306_2047",
     "target_parts": [
         {
-            "part_id": "2445",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "2449",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "2540",
-            "color_id": 15,
-            "color_name": "White"
-        },
-        {
-            "part_id": "2653",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "2654a",
-            "color_id": 72,
-            "color_name": "Dark Bluish Gray"
-        },
-        {
-            "part_id": "2877",
-            "color_id": 0,
-            "color_name": "Black"
-        },
-        {
-            "part_id": "3680",
-            "color_id": 15,
-            "color_name": "White"
-        },
-        {
-            "part_id": "3710",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "3795",
-            "color_id": 72,
-            "color_name": "Dark Bluish Gray"
-        },
-        {
-            "part_id": "3795",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "3832",
-            "color_id": 72,
-            "color_name": "Dark Bluish Gray"
-        },
-        {
-            "part_id": "3839b",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
             "part_id": "4073",
-            "color_id": 36,
-            "color_name": "Trans-Red"
-        },
-        {
-            "part_id": "4073",
-            "color_id": 15,
-            "color_name": "White"
-        },
-        {
-            "part_id": "6541",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "11055",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "14769",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "15391",
-            "color_id": 0,
-            "color_name": "Black"
-        },
-        {
-            "part_id": "15392",
-            "color_id": 72,
-            "color_name": "Dark Bluish Gray"
-        },
-        {
-            "part_id": "28653",
             "color_id": 4,
             "color_name": "Red"
-        },
-        {
-            "part_id": "28653",
-            "color_id": 40,
-            "color_name": "Trans-Brown"
-        },
-        {
-            "part_id": "30414",
-            "color_id": 0,
-            "color_name": "Black"
-        },
-        {
-            "part_id": "32000",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "32054",
-            "color_id": 0,
-            "color_name": "Black"
-        },
-        {
-            "part_id": "51739",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "59900",
-            "color_id": 36,
-            "color_name": "Trans-Red"
-        },
-        {
-            "part_id": "60481a",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "61184",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "61780",
-            "color_id": 72,
-            "color_name": "Dark Bluish Gray"
-        },
-        {
-            "part_id": "85984",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "87552",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
-        },
-        {
-            "part_id": "87620",
-            "color_id": 71,
-            "color_name": "Light Bluish Gray"
         }
     ],
     "render_settings": {
         "engine": "CYCLES",
         "render_mode": "ref_pieza",
         "mix_ratio": 0.75,
-        "res": 1920,
-        "square": false
+        "res": 2048,
+        "ref_res": 512,
+        "square": true
     }
 }

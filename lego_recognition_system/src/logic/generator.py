@@ -8,11 +8,6 @@ class SyntheticGenerator:
         self.ldraw_path = Path(ldraw_path)
         self.assets_dir = Path(assets_dir)
         self.output_dir = Path(output_dir)
-        # Resolve script path relative to this file to be robust
-        self.script_path = (Path(__file__).parent.parent / "blender_scripts" / "scene_setup.py").resolve()
-        
-        if not self.script_path.exists():
-            print(f"Warning: Blender script not found at {self.script_path}")
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def _create_temp_ldraw_lib(self, set_id, parts):
@@ -120,10 +115,26 @@ class SyntheticGenerator:
                         'ldraw_path': str(Path(temp_ldraw_path).resolve())
                     }, f)
                 
+                # In generators `part_list` controls what render mode is typically invoked, but we need
+                # to extract the mode from the config if available, or infer it here
+                
+                # Check for `ref_pieza` vs `images_mix` based on piece count or explicit parameter
+                # The generator is mostly used for either one based on UI invocation config
+                # We'll infer based on an environment variable or piece count assumption, 
+                # or passed params if we modify the generator interface later. 
+                # For now, default to single_piece_setup.py if we're rendering a single part reference batch
+                # To be completely safe and generic, we check what the set_id name is or rely on the UI 
+                # which passes 'mode'.
+                # But since `generator.py` currently builds the JSON itself without `render_mode` explicitly, 
+                # let's assume it inherits from environment or we inject `render_mode` explicitly later.
+                
+                # Default assume scene_setup.py
+                active_script = (Path(__file__).parent.parent / "blender_scripts" / "scene_setup.py").resolve()
+                
                 cmd = [
                     self.blender_path,
                     "--background",
-                    "--python", str(self.script_path),
+                    "--python", str(active_script),
                     "--",
                     str(temp_data_file)
                 ]
