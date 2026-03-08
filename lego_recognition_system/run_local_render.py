@@ -24,6 +24,7 @@ import math
 import threading
 from datetime import datetime
 from pathlib import Path
+from src.logic.lego_tiering_logic import get_part_tier
 
 # Dynamic worker manager (psutil-based resource monitoring)
 try:
@@ -108,6 +109,9 @@ def run_render_worker(worker_id, piece_id, chunks_for_worker, render_mode='image
             worker_cfg['resolution_x'] = res_x
             worker_cfg['resolution_y'] = res_x
             worker_cfg['ref_num_images'] = chunks_for_worker[0].get('imgs', 300)
+            # Inject numbering metadata at root level for Blender script simplicity
+            if 'numbering_meta' in chunks_for_worker[0]:
+                worker_cfg['numbering_meta'] = chunks_for_worker[0]['numbering_meta']
         else:
             res_x = chunks_for_worker[0].get('res', 1920)
             worker_cfg['resolution_x'] = res_x
@@ -226,6 +230,23 @@ def main(target_parts, render_settings=None):
     
     # 1. Resolve parts and split minifigs
     from src.logic.resolve_minifig import MinifigResolver
+    from src.logic.part_resolver import resolve_piece
+    
+    print(f"🔍 Enriching metadata for {len(target_parts)} pieces...")
+    enriched_parts = []
+    for p in target_parts:
+        if isinstance(p, dict):
+            pid = p.get('part_id', p.get('ldraw_id'))
+            if pid:
+                meta = resolve_piece(str(pid))
+                meta.update(p) # Keep original overrides
+                enriched_parts.append(meta)
+            else:
+                enriched_parts.append(p)
+        else:
+            enriched_parts.append(resolve_piece(str(p)))
+    target_parts = enriched_parts
+
     resolver = MinifigResolver(ldraw_path=LDRAW_PATH)
     
     regular_parts, minifig_parts = filter_minifig_parts(target_parts)
@@ -239,53 +260,15 @@ def main(target_parts, render_settings=None):
         print("\n📸 MODE: ref_pieza — Geometric Stability Analysis Pass")
         all_parts = regular_parts + minifig_parts
         
-        # 1. 🧪 GEOMETRIC ANALYSIS PHASE
-        print(f"🔍 Analyzing {len(all_parts)} pieces for stable resting positions...")
+        # 1. 🧪 GEOMETRIC ANALYSIS PHASE (Simplified via Part Resolver)
+        print(f"🔍 Using pre-calculated geometric stability and symmetry for {len(all_parts)} pieces...")
         
-        def run_analysis_one(p_entry):
+        part_orientations = {}
+        for p_entry in all_parts:
             if isinstance(p_entry, dict):
                 p_id = p_entry.get('part_id', p_entry.get('ldraw_id', str(p_entry)))
-                c_id = int(p_entry.get('color_id', 15))
-                c_name = p_entry.get('color_name', 'White')
-            else:
-                p_id = str(p_entry)
-                c_id = 15
-                c_name = 'White'
-            
-            # Use p_id_colorId as directory to separate same piece with different colors
-            dir_key = f"{p_id}_{c_id}"
-            out_base = RENDER_LOCAL_DIR / "ref_pieza" / dir_key
-            config_path = out_base / "meta" / "analysis_cfg.json"
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(config_path, 'w') as f:
-                json.dump({
-                    'parts': [{'ldraw_id': p_id, 'color_id': c_id, 'color_name': c_name}],
-                    'render_mode': 'ref_pieza',
-                    'ref_num_images': 1,
-                    'is_analyze_only': True,
-                    'output_base': str(out_base),
-                    'assets_dir': str(ASSETS_DIR),
-                    'ldraw_path': str(LDRAW_PATH),
-                    'addon_path': str(ADDON_PATH)
-                }, f)
-            
-            cmd = [BLENDER_PATH, "--background", "--python", str(SINGLE_PIECE_SETUP_PY), "--", str(config_path)]
-            
-            try:
-                subprocess.run(cmd, check=False, timeout=60, capture_output=True)
-                res_file = out_base / "meta" / "analysis_cfg.result"
-                if res_file.exists():
-                    with open(res_file, 'r') as f:
-                        data = json.load(f)
-                        return dir_key, data.get('orientations', [])
-            except: pass
-            return dir_key, []
-        part_orientations = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=multiprocessing.cpu_count()) as executor:
-            anal_results = list(executor.map(run_analysis_one, all_parts))
-            for pid, oris in anal_results:
-                part_orientations[pid] = oris
+                dir_key = f"{p_id}"
+                part_orientations[dir_key] = p_entry.get('geometric_poses', [])
 
         # 2. 🚀 RENDERING JOB GENERATION
         ref_jobs = []
@@ -296,50 +279,67 @@ def main(target_parts, render_settings=None):
                 p_id = p_entry.get('part_id', p_entry.get('ldraw_id', str(p_entry)))
                 color_id = p_entry.get('color_id', 15)
                 color_name = p_entry.get('color_name', 'White')
+                p_cat = p_entry.get('category', '')
             else:
                 p_id = str(p_entry)
                 color_id = 15
                 color_name = 'White'
+                p_cat = ''
             
-            dir_key = f"{p_id}_{color_id}"
-            oris = part_orientations.get(dir_key, [])
+            dir_key = f"{p_id}"
+            oris = p_entry.get('geometric_poses', [])
+            
+            # Determine Tier for this piece
+            p_ldraw_path = str(LDRAW_PATH / f"{p_id}.dat")
+            tier = get_part_tier(p_id, p_cat, p_ldraw_path)
+            
+            # Tier-based Rotation Settings
+            tier_rot_config = {
+                "TIER1": {"angles": 12, "elevations": 1},
+                "TIER2": {"angles": 36, "elevations": 1},
+                "TIER3": {"angles": 10, "elevations": 10},
+                "TIER4": {"angles": 20, "elevations": 10},
+            }
+            config = tier_rot_config.get(tier, tier_rot_config["TIER2"])
+            total_angles_per_face = config["angles"] * config["elevations"]
+
             if not oris:
-                # Fallback to random physics (previous behavior)
-                num_to_render = render_settings.get('ref_num_images', 300) if render_settings else 300
+                # Absolute fallback (no matrix)
+                oris = [{"matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]], "symmetry": 1}]
+
+            # Rotations per stable face based on Tier and Symmetry
+            for f_idx, pose_data in enumerate(oris):
+                symmetry = pose_data.get('symmetry', 1)
+                optimized_imgs = max(1, int(total_angles_per_face / symmetry))
+                
                 piece_cfg = [{
                     'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': color_name},
-                    'tier': 'REF',
-                    'imgs': num_to_render,
+                    'tier': tier,
+                    'imgs': optimized_imgs,
                     'engine': 'CYCLES',
                     'res': render_settings.get('res', 1920) if render_settings else 1920,
                     'ref_res': render_settings.get('ref_res', 640) if render_settings else 640,
                     'square': True,
-                    'stable_face_idx': -1,
-                    'ref_num_images': num_to_render,
-                    'offset_idx': 0
+                    'stable_face_idx': f_idx,
+                    'stable_matrix': pose_data.get('matrix'),
+                    'symmetry_order': symmetry,
+                    'ref_num_images': optimized_imgs,
+                    'offset_idx': total_imgs,
+                    'tier_config': config
                 }]
-                ref_jobs.append((f"{i}_rand", dir_key, piece_cfg, 'ref_pieza'))
-                total_imgs += num_to_render
-                print(f"⚠️  {p_id} (color {color_id}): No stable faces found. Falling back to {num_to_render} random drops.")
-            else:
-                # 24 images per stable face (15 degree rotations)
-                for f_idx in range(len(oris)):
-                    piece_cfg = [{
-                        'part': {'ldraw_id': p_id, 'color_id': color_id, 'name': p_id, 'color_name': color_name},
-                        'tier': 'REF',
-                        'imgs': 24,
-                        'engine': 'CYCLES',
-                        'res': render_settings.get('res', 1920) if render_settings else 1920,
-                        'ref_res': render_settings.get('ref_res', 640) if render_settings else 640,
-                        'square': True,
-                        'stable_face_idx': f_idx,
-                        'orientations': oris,
-                        'ref_num_images': 24,
-                        'offset_idx': f_idx * 24
-                    }]
-                    ref_jobs.append((f"{i}_{f_idx}", dir_key, piece_cfg, 'ref_pieza'))
-                    total_imgs += 24
-                print(f"✅ {p_id} (color {color_id}): {len(oris)} stable faces detected. Plan: {len(oris) * 24} rotational views.")
+                
+                # Inject numbering metadata into each part's config for ref_pieza mode
+                # Inject numbering metadata into each part's config for ref_pieza mode
+                for pc in piece_cfg:
+                    pc['numbering_meta'] = {
+                        'offset_idx': total_imgs,
+                        'ref_num_images': optimized_imgs
+                    }
+                
+                ref_jobs.append((f"{i}_{f_idx}", dir_key, piece_cfg, 'ref_pieza'))
+                total_imgs += optimized_imgs
+            
+            print(f"✅ {p_id} ({tier}): {len(oris)} stable faces. Optimized renders: {sum(max(1, int(total_angles_per_face / p.get('symmetry', 1))) for p in oris)}")
 
         print(f"📊 Total Render Plan: {total_imgs} images distributed across {len(ref_jobs)} specialized jobs.")
         
@@ -352,8 +352,8 @@ def main(target_parts, render_settings=None):
             # Default to cores (multi-process scale)
             max_workers = num_cores
             # Cap to a safe limit to prevent RAM panic causing aggressive throttle down
-            # M4 Pro has 12 cores, 10 workers is a conservative but stable sweet spot.
-            max_workers = min(max_workers, 10)
+            # M4 Pro has 12 cores, 8 workers is a conservative but stable sweet spot for UI responsiveness.
+            max_workers = min(max_workers, 8)
             
             # Support manual override or 'low_impact' mode
             if render_settings:
@@ -408,17 +408,17 @@ def main(target_parts, render_settings=None):
             low_impact = render_settings.get('low_impact', False) if render_settings else False
             
             if mix_res <= 640:
-                # CPU-bounded, but still keep headroom
-                max_workers = num_cores - (4 if low_impact else 2)
-                print(f"🚀 M4 Parallelism (Low-Res Mix): {max_workers} clusters active (headroom reserved).")
+                # CPU-bounded, but still keep headroom for macOS
+                max_workers = num_cores - (6 if low_impact else 4)
+                print(f"🚀 M4 Parallelism (Low-Res Mix): {max_workers} clusters active (extra headroom reserved).")
             else:
-                # GPU-bounded, needs more breathing room
-                max_workers = max(1, num_cores // (3 if low_impact else 2))
+                # GPU-bounded, needs more breathing room for WindowServer/UI
+                max_workers = max(1, num_cores // (4 if low_impact else 3))
                 print(f"🚀 M4 Standard Parallelism (High-Res Mix): {max_workers} clusters active.")
             
             # Cap the baseline worker count to prevent CPU/RAM panic oscillations
-            # Upgraded for M4 Pro: 10 workers for stable parallel mix jobs
-            max_workers = min(max_workers, 10)
+            # Upgraded for M4 Pro: 8 workers for stable parallel mix jobs while leaving margin.
+            max_workers = min(max_workers, 8)
             
             if render_settings and render_settings.get('max_workers'):
                 max_workers = render_settings['max_workers']
@@ -454,15 +454,22 @@ def main(target_parts, render_settings=None):
                         color_id = 15
                         color_name = 'White'
 
+                    tier = p_entry.get('tier', 'TIER2') if isinstance(p_entry, dict) else 'TIER2'
+                    
+                    # YOLO Frequency Multiplier
+                    freq_map = {"TIER1": 0.5, "TIER2": 1.0, "TIER3": 2.5, "TIER4": 4.0}
+                    multiplier = freq_map.get(tier, 1.0)
+
                     pieces_config.append({
                         'part': {'ldraw_id': p_id, 'color_id': int(color_id), 'color_name': color_name, 'name': p_id},
-                        'tier': 'MIX',
+                        'tier': tier,
                         'imgs': n_imgs,
                         'engine': 'CYCLES',
                         'res': mix_res,
                         'square': render_settings.get('square', False) if render_settings else True,
                         'parts_per_image': pieces_per_image,
                         'different_pieces': K,  # Tiered variety (D)
+                        'frequency_multiplier': multiplier
                     })
 
                 mix_jobs.append((str(w_idx), "mix", pieces_config, 'images_mix'))

@@ -17,7 +17,7 @@ from PIL import Image
 # ─────────────────────────────────────────────────────────────────────
 # 1. SLICE GENERATOR
 # ─────────────────────────────────────────────────────────────────────
-def generate_slices(image, slice_size=1024, overlap_ratio=0.20):
+def generate_slices(image, slice_size=1024, overlap_ratio=0.30):
     """
     Splits a PIL image into overlapping tiles.
 

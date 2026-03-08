@@ -1576,19 +1576,24 @@ def main():
 
         
         pc = pieces_config[0] if pieces_config else {}
-        piece_tier = pc.get('tier', 'REF').upper()
+        piece_tier = pc.get('tier', 'TIER2').upper()
+        tier_config = pc.get('tier_config', {"angles": 24, "elevations": 1})
+        
         if hasattr(scene, 'cycles'):
             scene.cycles.use_adaptive_sampling = True
             scene.cycles.adaptive_threshold = 0.05
-            if piece_tier == 'TIER1' or piece_tier == 'REF':
+            if piece_tier == 'TIER1':
                 scene.cycles.samples = 32
                 scene.cycles.max_bounces = 2
             elif piece_tier == 'TIER2':
                 scene.cycles.samples = 64
                 scene.cycles.max_bounces = 4
-            else: 
+            elif piece_tier == 'TIER3':
                 scene.cycles.samples = 128
                 scene.cycles.max_bounces = 6
+            else: # TIER4
+                scene.cycles.samples = 256
+                scene.cycles.max_bounces = 8
             print(f"  ⚡ TIER {piece_tier} Optimization: {scene.cycles.samples} samples active.")
             
         # --- EXECUTION LOOP ---
@@ -1597,7 +1602,12 @@ def main():
         worker_id = data.get('worker_id', '')
         prefix_base = f"w{worker_id}_" if worker_id != '' else ""
         class_id = template.get('id', 0)
-        num_images_final = num_rot_images # Total images for this worker
+        
+        # Calculate total images based on tier_config
+        angles = tier_config.get("angles", 24)
+        elevations = tier_config.get("elevations", 1)
+        num_rot_images = angles * elevations
+        num_images_final = num_rot_images
 
         # Physics Setup (if needed)
         SETTLE_FRAMES = 150
@@ -1656,58 +1666,68 @@ def main():
                 
                 bpy.context.view_layer.update()
                 
-                # ─── CAMERA: Option B — Dynamic height for training ──────────────
-                # ALIGNMENT: We MUST use the true geometric AABB center to target the camera.
-                # Object.location is the origin, which might not be centered after physical rotations.
-                bpy.context.view_layer.update()
+                # ─── CAMERA: Tier-based Coverage ─────────────────────────────────
+                # Determine current elevation and azimuth from 'r'
+                current_elev_idx = r // angles
+                current_angle_idx = r % angles
                 
-                # Get true visual center and radius from geometry vertices
-                aabb_center, aabb_radius = get_geometry_aabb(template_obj)
-                obj_dim = template_obj.dimensions  # world-space size
+                # Elevations: from 0 (cenital) to 45 degrees if multiple elevations requested
+                target_elevation = 0.0
+                if elevations > 1:
+                    max_elev = math.radians(45)
+                    target_elevation = (current_elev_idx / (elevations - 1)) * max_elev
                 
-                # Piece top = top of the bounding box
-                piece_top_z = aabb_center.z + (obj_dim.z / 2.0)
-                piece_center_x = aabb_center.x
-                piece_center_y = aabb_center.y
-                radius = aabb_radius
+                # Azimuth: 360 degrees distribution
+                azimuth = current_angle_idx * (2.0 * math.pi / angles)
 
+                # ALIGNMENT: GoldenCrop logic
+                aabb_center, aabb_radius = get_geometry_aabb(template_obj)
+                obj_dim = template_obj.dimensions
+                piece_top_z = aabb_center.z + (obj_dim.z / 2.0)
+                radius = max(aabb_radius, 0.005)
 
                 cam_obj = scene.camera
-                
-                # Remove any left-over constraints (HDRI setup may leave constraints)
-                for c in list(cam_obj.constraints):
-                    cam_obj.constraints.remove(c)
+                for c in list(cam_obj.constraints): cam_obj.constraints.remove(c)
                 
                 focal_mm = 26.0
-                sensor_half_mm = 18.0  # 36mm sensor / 2
-                # ALIGNMENT: GoldenCrop scales to ~80% occupancy. 
-                # radius = 40% of sensor half.
+                sensor_half_mm = 18.0
                 fill_ratio = 0.40
-
-                # Use at least 5mm radius so tiny pieces don't get extreme close-ups
-                effective_radius = max(radius, 0.005)
-                # target_dist is the optical distance needed to achieve 80% occupancy
-                target_dist = (effective_radius * focal_mm) / (fill_ratio * sensor_half_mm)
+                target_dist = (radius * focal_mm) / (fill_ratio * sensor_half_mm)
                 
-                # CRITICAL ALIGNMENT: Camera MUST stay fixed at 0.70m physical height to 
-                # preserve the exact perspective of the physical setup (iPhone 16 on mount).
-                cam_z = 0.70
-                real_dist = max(0.01, cam_z - piece_top_z)
-                
-                # We achieve the framing of target_dist by using digital zoom (cropping the sensor)
-                # This mathematically emulates cropping a 24MP image perfectly.
+                # Physical Ceiling
+                cam_height = 0.70
+                real_dist = max(0.01, cam_height - piece_top_z)
                 new_sensor_width = 36.0 * (target_dist / real_dist)
+
+                # Calculate camera position based on elevation and azimuth
+                # We orbit around the piece's visual center
+                dist_orbit = 0.70 # Keep fixed distance to maintain perspective
                 
-                cam_obj.location = (piece_center_x, piece_center_y, cam_z)
+                # Spherical to Cartesian (Z-axis is UP)
+                # target_elevation = 0 is straight down
+                off_x = dist_orbit * math.sin(target_elevation) * math.cos(azimuth)
+                off_y = dist_orbit * math.sin(target_elevation) * math.sin(azimuth)
+                off_z = dist_orbit * math.cos(target_elevation)
+                
+                cam_obj.location = (aabb_center.x + off_x, aabb_center.y + off_y, aabb_center.z + off_z)
+                
+                # Point camera to center
+                # Use a track-to constraint or manual rotation. For 0 elevation, (0,0,0) is correct.
+                # For simplicity and robust cenital-aligned metadata, we manually calculate.
+                if target_elevation == 0:
+                    cam_obj.rotation_euler = (0, 0, 0)
+                else:
+                    # Point to aabb_center
+                    direction = aabb_center - cam_obj.location
+                    rot_quat = direction.to_track_quat('-Z', 'Y')
+                    cam_obj.rotation_euler = rot_quat.to_euler()
+
                 cam_obj.data.lens = focal_mm
                 cam_obj.data.sensor_width = new_sensor_width
                 cam_obj.data.dof.focus_distance = real_dist
                 
-                # Cenital: rotation (0,0,0) looks straight down in Blender 5.0
-                cam_obj.rotation_euler = (0, 0, 0)
                 bpy.context.view_layer.update()
-                print(f"  📷 Camera: FIXED Z=70cm | piece_top={piece_top_z*1000:.1f}mm | "
-                      f"optical_zoom_dist={target_dist*100:.1f}cm | new_sensor_w={new_sensor_width:.2f}mm")
+                print(f"  📷 Tier {piece_tier} Camera: Elev={math.degrees(target_elevation):.1f}° Azim={math.degrees(azimuth):.1f}° | sensor_w={new_sensor_width:.2f}mm")
                 # ─────────────────────────────────────────────────────────────────
 
 
@@ -1841,7 +1861,30 @@ def main():
             K = min(current_parts_count, max(1, int(len(available_templates) * 0.75)))
             # Additionally, ensure K cannot exceed available types
             K = min(K, len(available_templates))
-            selected_templates = random.sample(available_templates, K)
+            
+            # WEIGHTED SELECTION based on frequency_multiplier
+            # Get weights for each template (default to 1.0 if not found)
+            weights = []
+            for t in available_templates:
+                # pieces_config is in global or passed scope? 
+                # unique_meshes elements don't have the multiplier, 
+                # but we can find it in the original pieces_config
+                ld = t.get('ldraw_id')
+                mult = 1.0
+                for pc in pieces_config:
+                    if pc.get('part', {}).get('ldraw_id') == ld:
+                        mult = pc.get('frequency_multiplier', 1.0)
+                        break
+                weights.append(mult)
+            
+            if sum(weights) > 0:
+                selected_templates = random.choices(available_templates, weights=weights, k=K)
+                # Ensure uniqueness in selection if possible (random.choices is with replacement)
+                selected_templates = list(set(selected_templates))
+                # Re-check K if set() reduced it
+                K = len(selected_templates)
+            else:
+                selected_templates = random.sample(available_templates, K)
         else:
             K = 0
             selected_templates = []

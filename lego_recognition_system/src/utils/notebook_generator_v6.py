@@ -12,6 +12,7 @@ from src.utils.notebook_templates_v6 import (
     MARKDOWN_HEADER_V6,
     C0_SETUP_LIGHTNING,
     C0_SETUP_KAGGLE,
+    C0_SETUP_COLAB,
     C1_LOAD_DATASET,
     C2_TRAIN_LIGHTNING,
     C3_INDEX,
@@ -135,6 +136,42 @@ def generate_kaggle_v6(output_dir=None, timestamp=None):
     return filepath
 
 
+def generate_colab_v6(output_dir=None, timestamp=None):
+    """
+    Generates a Google Colab v6.0 notebook (Hybrid Pipeline).
+    
+    Returns:
+        Path to the generated notebook file.
+    """
+    if timestamp is None:
+        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M')
+    
+    if output_dir is None:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        output_dir = os.path.join(project_root, 'notebooks')
+    
+    colab_dir = os.path.join(output_dir, 'colab')
+    os.makedirs(colab_dir, exist_ok=True)
+    
+    cells = [
+        _make_markdown_cell(MARKDOWN_HEADER_V6),
+        _make_code_cell(C0_SETUP_COLAB),
+        _make_code_cell(C1_LOAD_DATASET),
+        _make_code_cell(C2_TRAIN_LIGHTNING),
+    ]
+    
+    notebook = _build_notebook(cells)
+    
+    filename = "Colab_v6_Master.ipynb"
+    filepath = os.path.join(colab_dir, filename)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        json.dump(notebook, f, indent=4, ensure_ascii=False)
+    
+    print(f"✅ Generated: colab/{filename}")
+    return filepath
+
+
 def generate_all_v6(output_dir=None, timestamp=None):
     """Generates notebooks for both environments."""
     if timestamp is None:
@@ -143,6 +180,7 @@ def generate_all_v6(output_dir=None, timestamp=None):
     paths = {
         'lightning': generate_lightning_v6(output_dir=output_dir, timestamp=timestamp),
         'kaggle': generate_kaggle_v6(output_dir=output_dir, timestamp=timestamp),
+        'colab': generate_colab_v6(output_dir=output_dir, timestamp=timestamp),
     }
     
     return paths

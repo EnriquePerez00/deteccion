@@ -1,0 +1,10 @@
+{
+    "target_parts": [
+        "2653"
+    ],
+    "render_settings": {
+        "render_mode": "ref_pieza",
+        "res": 768,
+        "ref_res": 640
+    }
+}

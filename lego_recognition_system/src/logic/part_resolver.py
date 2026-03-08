@@ -7,11 +7,16 @@ import os
 import json
 import random
 import logging
+from src.logic.lego_tiering_logic import get_part_tier
+from src.logic.geometric_pose_analysis import get_pose_universe
+from src.blender_scripts.ldraw_resolver import LDrawResolver
 
 logger = logging.getLogger("LegoVision")
 
 REBRICKABLE_API_BASE = "https://rebrickable.com/api/v3/lego"
 INVENTORY_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "data", "inventory")
+LDRAW_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "ldraw")
+resolver = LDrawResolver(ldraw_path_base=LDRAW_PATH)
 
 def get_api_key():
     """Load Rebrickable API key from config.json."""
@@ -98,6 +103,8 @@ def resolve_set(set_id: str, max_parts: int = None) -> list:
                 "category": part.get("category", ""),
                 "color_id": color_id,
                 "color_name": part.get("color_name", "White"),
+                "tier": get_part_tier(lid, part.get("category", "")),
+                "geometric_poses": _get_geometric_poses(lid)
             }
 
     unique_parts = list(seen.values())
@@ -128,7 +135,13 @@ def resolve_piece(part_num: str) -> dict:
             with open(universal_path, "r") as f:
                 universe = {str(p.get("part_num")): p for p in json.load(f)}
                 if part_num in universe:
-                    return universe[part_num]
+                    resolved = universe[part_num]
+                    # Ensure metadata is complete even if loaded from cache
+                    if "tier" not in resolved or "geometric_poses" not in resolved:
+                        lid = resolved.get("ldraw_id", part_num)
+                        resolved["tier"] = get_part_tier(lid, resolved.get("category", ""))
+                        resolved["geometric_poses"] = _get_geometric_poses(lid)
+                    return resolved
         except: pass
 
     # 2. Fetch from Rebrickable API
@@ -150,6 +163,9 @@ def resolve_piece(part_num: str) -> dict:
             "part_num": p.get("part_num", ""),
             "ldraw_id": ldraw_id,
             "name": p.get("name", ""),
+            "category": p.get("category", {}).get("name", ""),
+            "tier": get_part_tier(ldraw_id, p.get("category", {}).get("name", "")),
+            "geometric_poses": _get_geometric_poses(ldraw_id)
         }
         
         # Update universal inventory with this new piece
@@ -205,3 +221,10 @@ def update_universal_inventory(parts: list) -> int:
             logger.error(f"Failed to save universal inventory: {e}")
             
     return added
+
+def _get_geometric_poses(ldraw_id):
+    """Helper to get pre-calculated geometric poses for a part."""
+    path = resolver.find_part(ldraw_id)
+    if path:
+        return get_pose_universe(path, resolver)
+    return [{"matrix": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]], "symmetry": 1}]

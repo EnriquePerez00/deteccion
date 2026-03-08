@@ -1,17 +1,24 @@
 {
-  "generated_at": "2026-03-06T20:59:30.837904",
-  "duration_minutes": 11.9,
+  "generated_at": "2026-03-08T20:51:34.968696",
+  "duration_minutes": 1.0,
   "render_mode": "ref_pieza",
   "total_pieces": 3,
-  "total_images": 1985,
+  "total_images": 1198,
   "duplicates_removed": 0,
   "pieces": [
     {
-      "piece_id": "4073_4",
+      "piece_id": "4073",
       "mode": "ref_pieza",
-      "images": 984,
-      "labels": 984,
-      "data_yaml": "ref_pieza/4073_4/data.yaml"
+      "images": 36,
+      "labels": 36,
+      "data_yaml": "ref_pieza/4073/data.yaml"
+    },
+    {
+      "piece_id": "61780",
+      "mode": "ref_pieza",
+      "images": 162,
+      "labels": 162,
+      "data_yaml": "ref_pieza/61780/data.yaml"
     },
     {
       "piece_id": "images_mix",
@@ -19,13 +26,6 @@
       "images": 1000,
       "labels": 1214,
       "data_yaml": "images_mix/data.yaml"
-    },
-    {
-      "piece_id": "test_render",
-      "mode": "legacy",
-      "images": 1,
-      "labels": 1,
-      "data_yaml": "test_render/data.yaml"
     }
   ]
 }

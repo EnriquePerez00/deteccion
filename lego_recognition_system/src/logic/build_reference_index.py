@@ -128,8 +128,9 @@ def build_index(dataset_dir, output_folder, unified=True, force=False, extractor
         # Get the first piece identity from metadata
         first_img = next(iter(image_meta.values()))
         if first_img['ids']:
-            if ldraw_id in indexed_pairs:
-                print(f"   ⏭️  Piece {ldraw_id} already in index. Skipping extraction.")
+            ld_id = first_img['ids'][0]
+            if ld_id in indexed_pairs:
+                print(f"   ⏭️  Piece {ld_id} already in index. Skipping extraction.")
                 return
     # -------------------------------
     
@@ -202,8 +203,8 @@ def build_index(dataset_dir, output_folder, unified=True, force=False, extractor
             piece_data[ldraw_id]['embeddings'].append(embedding)
             piece_data[ldraw_id]['metadata'].append({
                 'ldraw_id': ldraw_id,
-                'color_id': 7,
-                'color_name': 'Light Gray'
+                'color_id': color_id,
+                'color_name': 'Reference'
             })
             
             processed_count += 1
@@ -239,7 +240,7 @@ def build_index(dataset_dir, output_folder, unified=True, force=False, extractor
                 continue
             
             for emb in data['final_embeddings']:
-                unified_index.add(emb, {'ldraw_id': ldraw_id, 'color_id': 7})
+                unified_index.add(emb, {'ldraw_id': ldraw_id, 'color_id': color_id})
                 added_count += 1
         
         if added_count > 0:

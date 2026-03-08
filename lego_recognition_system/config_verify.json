@@ -1,8 +1,8 @@
 {
-    "session_reference": "61780_20260308_2055",
+    "session_reference": "verify_fix_4073",
     "target_parts": [
         {
-            "part_id": "61780",
+            "part_id": "4073",
             "color_id": 7,
             "color_name": "Light Gray"
         }
@@ -10,9 +10,9 @@
     "render_settings": {
         "engine": "CYCLES",
         "render_mode": "ref_pieza",
-        "mix_ratio": 0.75,
-        "res": 2048,
+        "res": 512,
         "ref_res": 512,
-        "square": true
+        "square": true,
+        "skip_zip": true
     }
 }

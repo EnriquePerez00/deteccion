@@ -11,6 +11,18 @@ from src.logic.lego_colors import LEGO_COLORS
 from src.logic.model_registry import get_training_status, filter_pending
 from src.logic.analysis_helper import get_stable_faces_for_piece
 
+def get_best_python_executable(project_root):
+    """
+    Finds the most appropriate python executable.
+    Priority: 
+    1. .venv/bin/python3 (Local project environment)
+    2. sys.executable (Fallback to current streamlit runtime)
+    """
+    venv_python = os.path.join(project_root, ".venv", "bin", "python3")
+    if os.path.exists(venv_python):
+        return venv_python
+    return sys.executable
+
 
 def natural_sort_key(s):
     """Sort strings containing numbers in natural order (e.g., 1, 2, 11 instead of 1, 11, 2)."""
@@ -45,6 +57,11 @@ def render_launcher_ui(project_root):
 
     st.header("🚀 LEGO Training Launchpad v2.0")
     st.markdown("Pipeline dual: **ref_pieza** (360° referencia) + **images_mix** (mezcla N/K).")
+    
+    # Environment Check
+    best_python = get_best_python_executable(project_root)
+    if ".venv" not in best_python:
+        st.warning("⚠️ **Entorno virtual (.venv) no detectado.** Se recomienda crear uno e instalar las dependencias de `requirements.txt` para evitar fallos en la indexación.")
 
     # --- 1. Selección de Objetivo ---
     st.subheader("1. Selección de Objetivo")
@@ -406,8 +423,14 @@ def render_launcher_ui(project_root):
             # --- PHASE 1: RENDERING (0% to 80%) ---
             status_ui.metric("Fase Actual", "1/2: Renderizado 3D")
             import subprocess
+            
+            # Resolve the correct python (favouring .venv even if Streamlit is system-wide)
+            best_python = get_best_python_executable(project_root)
+            if best_python != sys.executable:
+                st.caption(f"🔧 Utilizando entorno: `.venv` ({os.path.basename(best_python)})")
+            
             render_script = os.path.join(project_root, "run_local_render.py")
-            cmd_render = [sys.executable, render_script]
+            cmd_render = [best_python, render_script]
             if not gen_zip:
                 cmd_render.append("--no-zip")
             
@@ -456,7 +479,7 @@ def render_launcher_ui(project_root):
                 progress_pct_ui.metric("Progreso Global", "85%")
                 
                 index_script = os.path.join(project_root, "run_incremental_indexing.py")
-                cmd_index = [sys.executable, index_script]
+                cmd_index = [best_python, index_script]
                 env = dict(os.environ, PYTHONUNBUFFERED='1')
                 process_index = subprocess.Popen(cmd_index, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, env=env)
                 

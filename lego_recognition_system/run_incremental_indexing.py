@@ -93,8 +93,7 @@ def run_full_indexing(extractor_weights=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.get_default("--weights", None)
-    parser.add_argument("--weights", type=str, help="Path to DINOv2 weights (.pth)")
+    parser.add_argument("--weights", type=str, default=None, help="Path to DINOv2 weights (.pth)")
     args = parser.parse_args()
 
     print(f"🚀 Iniciando indexación incremental funcional...")
